@@ -8,15 +8,16 @@
 
 ## Status Proyek
 
-Saat ini proyek berada pada **Tahap 0 / Inisialisasi Fondasi**:
+Saat ini proyek telah menyelesaikan **Tahap 1 — Implementasi Basis Data SQLite & Persistensi Repositori**:
 
 - Fondasi proyek Flutter (Android-first) dengan arsitektur **MVVM** dan struktur *feature-first*.
 - Sistem desain **Material Design 3** (Mode Terang) dengan token warna, tipografi, dan spasi 8-poin terpusat.
-- Navigasi lima halaman utama persisten menggunakan **GoRouter** (`StatefulShellRoute`) beserta rute sekunder (Detail Mata Kuliah, Tambah/Ubah Tugas, Simulasi Nilai).
-- Manajemen state berbasis **Provider + ChangeNotifier** dan pola **Repository** (masih menggunakan implementasi *in-memory* berisi data demonstrasi fiktif).
-- Utilitas kalkulasi akademik terpisah dari lapisan UI beserta *unit test* dan *widget test*.
-
-Persistensi lokal SQLite (`sqflite`) dan editor lengkap aturan penilaian akan dibangun pada fase berikutnya (lihat [docs/IMPLEMENTATION_ROADMAP.md](docs/IMPLEMENTATION_ROADMAP.md)).
+- Navigasi lima halaman utama persisten menggunakan **GoRouter** (`StatefulShellRoute`) beserta rute sekunder (Detail Mata Kuliah, Tambah/Ubah/Hapus Tugas, Simulasi Nilai).
+- Lapisan basis data relasional **SQLite** (`sqflite`) dengan 10 tabel ternormalisasi, penegakan *foreign key*, transaksi atomik, 13 indeks query, serta manajer migrasi skema (`DatabaseMigrationManager`).
+- Repositori terintegrasi penuh ke SQLite (`SqliteProfileRepository`, `SqliteCourseRepository`, `SqliteScheduleRepository`, `SqliteTaskRepository`, `SqliteAcademicRepository`) dengan strategi *cache-backed / offline-first*.
+- Strategi *seeding* awal *idempotent* (`DatabaseSeeder`) dengan data demonstrasi fiktif yang tidak menimpa data pengguna.
+- Perhitungan akademik murni terpisah di `AcademicCalculator` (provisional grade, kesiapan final grade, IPS/IPK dinamis, isolasi simulasi nilai).
+- Pengujian komprehensif mencakup *unit test* kalkulator, *database schema test*, *repository persistence lifecycle test*, dan *widget test* pada viewport `393 × 852 px`.
 
 ---
 
@@ -30,7 +31,8 @@ Persistensi lokal SQLite (`sqflite`) dan editor lengkap aturan penilaian akan di
 | Arsitektur | MVVM (*feature-first*) + Repository Pattern |
 | State Management | `provider` (`ChangeNotifier`) |
 | Navigasi | `go_router` (`StatefulShellRoute.indexedStack`) |
-| Persistensi Lokal (Rencana) | SQLite melalui `sqflite` |
+| Persistensi Lokal | SQLite melalui `sqflite` & `path` |
+| Pengujian Database Lokal | `sqflite_common_ffi` (eksekusi pengujian di lingkungan Windows) |
 
 ---
 

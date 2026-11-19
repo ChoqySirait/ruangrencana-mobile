@@ -61,6 +61,10 @@ Sistem harus mendukung konfigurasi skala nilai milik pengguna yang mencakup:
 - **Validasi anti-tumpang tindih (*non-overlapping*)**:
   - Setiap aturan harus memenuhi `minScore <= maxScore`.
   - Setelah diurutkan naik berdasarkan `minScore`, tidak boleh ada aturan ke-$k$ yang memiliki `minScore <= previous.maxScore`.
+- **Perilaku Batas Ambang (*Boundary Behavior*)**:
+  - Setiap rentang bersifat inklusif (`score >= minScore && score <= maxScore`).
+  - Untuk nilai sempurna `100.0`, aturan skala teratas menggunakan `minScore` (mis. `85.0`) hingga `100.0`.
+  - Rentang tepat di bawahnya menggunakan batas atas desimal (mis. `84.99`), sehingga tidak ada skor yang jatuh di antara dua rentang atau memiliki tafsir ganda.
 - **Kebijakan dapat diubah**: pengguna dapat membuat, mengubah, atau memilih profil skala sesuai aturan kampusnya.
 
 > Catatan tahap fondasi: Skala 4.00 yang muncul pada data demo saat ini hanyalah **contoh konfigurasi awal**, bukan standar baku yang dipaksakan.

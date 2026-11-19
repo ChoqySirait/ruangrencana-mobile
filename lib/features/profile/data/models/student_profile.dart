@@ -1,6 +1,7 @@
-/// Model profil mahasiswa (data demonstrasi fiktif pada tahap inisialisasi).
+/// Model profil mahasiswa dan preferensi lokal RuangRencana.
 class StudentProfile {
   const StudentProfile({
+    this.id,
     required this.fullName,
     required this.studentId,
     required this.email,
@@ -13,9 +14,10 @@ class StudentProfile {
     required this.notifyWeeklySummary,
   });
 
+  final int? id;
   final String fullName;
 
-  /// Nomor induk fiktif untuk data demo (bukan NIM asli).
+  /// Nomor induk (NIM) mahasiswa di perangkat lokal.
   final String studentId;
   final String email;
   final String university;
@@ -35,6 +37,7 @@ class StudentProfile {
   }
 
   StudentProfile copyWith({
+    int? id,
     String? fullName,
     String? studentId,
     String? email,
@@ -47,6 +50,7 @@ class StudentProfile {
     bool? notifyWeeklySummary,
   }) {
     return StudentProfile(
+      id: id ?? this.id,
       fullName: fullName ?? this.fullName,
       studentId: studentId ?? this.studentId,
       email: email ?? this.email,

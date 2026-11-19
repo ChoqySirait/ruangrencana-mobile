@@ -2,24 +2,28 @@
 
 ## 1. Prinsip Arsitektur
 
-RuangRencana dirancang dengan tiga prinsip utama:
+RuangRencana dirancang dengan empat prinsip utama:
 
-1. **Pemisahan Tanggung Jawab (*Separation of Concerns*)**: Widget Flutter hanya merender tampilan dan meneruskan interaksi pengguna. State tampilan dan alur aplikasi berada di **ViewModel**, akses data di **Repository**, dan perhitungan akademik di utilitas domain murni (`AcademicCalculator`).
-2. **Organisasi *Feature-First***: Setiap fitur bisnis dikelompokkan dalam foldernya sendiri agar mudah ditambah, diuji, atau direfaktor secara terisolasi.
-3. **Siap Migrasi ke SQLite tanpa Mengubah UI**: ViewModel bergantung pada kontrak abstrak (`abstract class *Repository`), bukan langsung pada implementasi *in-memory*. Saat `sqflite` ditambahkan pada tahap berikutnya, cukup mengganti implementasi repository pada titik penyusunan dependensi (`lib/app/app.dart`).
+1. **Pemisahan Tanggung Jawab (*Separation of Concerns*)**: Widget Flutter hanya merender tampilan dan meneruskan interaksi pengguna. State tampilan dan alur aplikasi berada di **ViewModel**, akses dan mutasi data di **Repository**, dan perhitungan akademik murni di domain calculator (`AcademicCalculator`).
+2. **Organisasi *Feature-First***: Setiap fitur bisnis dikelompokkan dalam foldernya sendiri (`courses`, `schedule`, `tasks`, `academic`, `profile`, `dashboard`) agar mudah diuji, dimutasi, atau direfaktor secara terisolasi.
+3. **Pola Repositori Terabstraksi (*Abstract Repository Pattern*)**: ViewModel hanya bergantung pada kontrak antarmuka abstrak (`abstract class CourseRepository`, `TaskRepository`, dsb.), bukan langsung pada driver basis data SQLite. Hal ini memungkinkan transisi mulus dari *in-memory* ke *SQLite* (`sqflite`), dan nantinya ke sinkronisasi REST API tanpa merombak lapisan antarmuka pengguna (UI).
+4. **Strategi *Cache-Backed / Offline-First***: Repositori membaca dari SQLite saat inisialisasi dan memelihara cache lokal dalam memori untuk pembacaan UI sinkron yang instan. Setiap mutasi data (CREATE, UPDATE, DELETE) langsung dieksekusi ke basis data SQLite menggunakan kueri terparameterisasi dan transaksi atomik.
 
-## 2. Alur Mulai Aplikasi dari `main.dart`
+---
+
+## 2. Alur Eksekusi Aplikasi dari `main.dart`
 
 ```text
 lib/main.dart
    │  WidgetsFlutterBinding.ensureInitialized()
-   │  runApp(const RuangRencanaApp())
+   │  AppDatabase.instance.open()  ──► Mengaktifkan PRAGMA foreign_keys = ON & Skema V1
+   │  DatabaseSeeder.seedIfNeeded() ──► Idempotent initial seed (data demo fiktif)
+   │  Sqlite*Repository.load()     ──► Memuat data SQLite ke memori repositori
+   │  runApp(RuangRencanaApp(...))
    ▼
 lib/app/app.dart (RuangRencanaApp)
-   ├─ Membuat instance GoRouter (AppRouter.createRouter)
-   ├─ Menginisialisasi Repository (InMemory*Repository)
-   ├─ Menginisialisasi ViewModel (ChangeNotifier)
-   ├─ Membungkus pohon widget dengan MultiProvider
+   ├─ Menyusun Provider dependency injection (MultiProvider)
+   ├─ Menginstansiasi ViewModel (ChangeNotifier) terhubung ke repositori
    └─ Merender MaterialApp.router(theme: AppTheme.light, routerConfig: _router)
          │
          ▼
@@ -33,34 +37,57 @@ lib/app/router/app_router.dart
    └─ Rute sekunder (rootNavigatorKey, tampil di atas bottom navigation)
         ├─ /mata-kuliah/:courseId     -> CourseDetailView
         ├─ /tugas/tambah              -> TaskFormView (mode tambah)
-        ├─ /tugas/:taskId/edit        -> TaskFormView (mode ubah)
+        ├─ /tugas/:taskId/edit        -> TaskFormView (mode ubah & hapus)
         └─ /akademik/simulasi-nilai   -> GradeSimulatorView
 ```
 
-## 3. Lapisan Arsitektur (MVVM + Repository)
+---
+
+## 3. Alur Data Melalui Lapisan MVVM dan SQLite
+
+```text
+  [ User Interaction di UI ]
+              │ (1. Panggil metode ViewModel, mis. saveNewAssignment)
+              ▼
+    [ TasksViewModel ]
+              │ (2. Panggil TaskRepository.addAssignment)
+              ▼
+  [ SqliteTaskRepository ]
+              │ (3. Parameterized INSERT ke SQLite)
+              ▼
+   [ AppDatabase (SQLite) ]  ──► Disimpan permanen ke disk
+              │ (4. Kueri data termutakhir)
+              ▼
+  [ SqliteTaskRepository ]
+              │ (5. Memperbarui cache memori)
+              ▼
+    [ TasksViewModel ]
+              │ (6. notifyListeners() & _onDataChanged callback)
+              ▼
+ [ UI Widgets (Consumer/watch) ] ──► Tampilan terbarui otomatis tanpa flicker
+```
+
+---
+
+## 4. Lapisan Arsitektur dan Tanggung Jawab
 
 | Lapisan | Lokasi | Tanggung Jawab |
 | --- | --- | --- |
-| **View & Feature Widgets** | `features/<fitur>/presentation/views/` & `widgets/` | Menampilkan UI dari state ViewModel; tidak memuat rumus akademik maupun data mentah. |
-| **ViewModel** | `features/<fitur>/presentation/view_models/` | Mengelola state UI menggunakan `ChangeNotifier`, memanggil Repository, dan memberi tahu View melalui `notifyListeners()`. |
-| **Repository** | `features/<fitur>/data/repositories/` | Menyediakan kontrak abstrak akses data dan implementasinya (saat ini *in-memory*, nantinya SQLite). |
-| **Model** | `features/<fitur>/data/models/` | Representasi struktur data tidak langsung terikat ke widget. |
-| **Core & Domain Utils** | `lib/core/` | Utilitas murni (`AcademicCalculator`, `DateFormatter`), kontrak error (`AppFailure`), konstanta, dan widget UI bersama. |
-| **App Shell & Theme** | `lib/app/` | Konfigurasi `ThemeData`, token warna/spasi/tipografi, GoRouter, serta komposisi Provider. |
+| **View & Feature Widgets** | `features/<fitur>/presentation/views/` & `widgets/` | Menampilkan antarmuka dari state ViewModel; tidak memuat SQL, rumus akademik mentah, atau kredensial. |
+| **ViewModel** | `features/<fitur>/presentation/view_models/` | Mengelola state UI berbasis `ChangeNotifier`, memanggil Repository, dan memicu pembaruan melalui `notifyListeners()`. |
+| **Repository** | `features/<fitur>/data/repositories/` | Kontrak abstrak (`CourseRepository`, `TaskRepository`, dsb.) dan implementasi konkret berbasis SQLite (`Sqlite*Repository`). |
+| **Model** | `features/<fitur>/data/models/` | Representasi data domain dan pemetaan entitas. |
+| **Database Layer** | `lib/core/database/` | `AppDatabase` (koneksi & transaksi), `DatabaseSchema` (tabel V1 & indeks), `DatabaseMigrations` (manajer migrasi), `DatabaseSeeder` (seeder idempotent). |
+| **Core & Domain Utils** | `lib/core/` | `AcademicCalculator` (fungsi murni kalkulasi), `DateFormatter` (pemformat tanggal ID), `AppFailure` (penanganan error domain). |
 
-## 4. Keputusan Teknis Penting
+---
 
-### Pemilihan `StatefulShellRoute.indexedStack` (GoRouter)
-Mempertahankan state masing-masing tab (misalnya filter aktif pada halaman Tugas atau hari terpilih pada halaman Jadwal) ketika pengguna berpindah antar tab bawah, sementara rute sekunder menggunakan `rootNavigatorKey` agar bilah navigasi bawah otomatis tersembunyi saat membuka detail atau formulir.
+## 5. Strategi Masa Depan Menuju Integrasi REST API
 
-### Pemilihan `Provider + ChangeNotifier`
-Ringan, resmi direkomendasikan ekosistem Flutter, mudah dipahami untuk pemeliharaan jangka panjang, dan cukup untuk mengelola komunikasi antar fitur (misalnya pembaruan tugas atau profil langsung memicu `DashboardViewModel.refresh()`).
+Arsitektur saat ini dirancang agar siap diintegrasikan dengan backend REST API di masa mendatang:
 
-### Pemisahan `GradeSimulatorViewModel`
-`GradeSimulatorViewModel` dibuat dengan siklus hidup lokal pada layar `GradeSimulatorView` dan hanya membaca `AcademicRepository` secara *read-only*. Skor hipotetis disimpan terpisah pada peta memori lokal sehingga mustahil menimpa nilai akademik sebenarnya.
-
-### Substitusi Font (Roboto)
-Spesifikasi desain menyarankan font **Inter** jika aset berlisensi tersedia. Pada tahap inisialisasi ini, aplikasi menggunakan **Roboto** (font bawaan Android) yang didefinisikan terpusat pada `lib/app/theme/app_text_styles.dart` sehingga penggantian ke Inter di masa depan cukup dilakukan di satu tempat plus pendaftaran aset pada `pubspec.yaml`.
-
-### Rencana Persistensi Lokal (SQLite / `sqflite`)
-Tahap berikutnya akan memperkenalkan lapisan `local_database` (pembukaan DB, manajemen versi skema, dan DAO/tabel) di balik antarmuka `CourseRepository`, `ScheduleRepository`, `TaskRepository`, `AcademicRepository`, dan `ProfileRepository`. Pada tahap fondasi ini, kelas placeholder database sengaja tidak dibuat agar tidak meninggalkan kode mati (*dead code*).
+1. **Titik Sinkronisasi pada Repositori**: Repositori tetap menjadi satu-satunya sumber data bagi ViewModel. Repositori dapat menerapkan strategi *NetworkBoundResource* atau *SyncAdapter*:
+   - Tulis lokal ke SQLite terlebih dahulu (*Offline-First*).
+   - Kirim *payload* mutasi ke REST API di latar belakang saat jaringan tersedia.
+2. **Tanpa Perubahan pada UI & ViewModel**: ViewModel dan UI tidak memedulikan apakah data berasal dari SQLite lokal, memori, atau REST API jarak jauh karena antarmuka `TaskRepository`, `CourseRepository`, dll. tetap identik.
+3. **Pemisahan Identitas dan Token**: Sesi otentikasi (JWT / OAuth2) nantinya disimpan aman menggunakan `flutter_secure_storage`, sementara profil pengguna dan data akademik tetap di-cache secara relasional di SQLite lokal.

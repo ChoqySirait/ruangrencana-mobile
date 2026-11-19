@@ -120,12 +120,47 @@ class _TaskFormViewState extends State<TaskFormView> {
       SnackBar(
         content: Text(
           widget.isEditMode
-              ? 'Perubahan tugas disimpan (memori lokal sesi ini).'
-              : 'Tugas baru berhasil ditambahkan (memori lokal sesi ini).',
+              ? 'Perubahan tugas berhasil disimpan ke database.'
+              : 'Tugas baru berhasil disimpan ke database.',
         ),
       ),
     );
     context.pop();
+  }
+
+  Future<void> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Hapus Tugas'),
+        content: Text(
+          'Apakah Anda yakin ingin menghapus "${_editingItem?.title}"?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      await context.read<TasksViewModel>().deleteAssignment(_editingItem!.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tugas berhasil dihapus dari database.'),
+          ),
+        );
+        context.pop();
+      }
+    }
   }
 
   @override
@@ -135,6 +170,17 @@ class _TaskFormViewState extends State<TaskFormView> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.isEditMode ? 'Ubah Tugas' : 'Tambah Tugas'),
+        actions: [
+          if (widget.isEditMode && _editingItem != null)
+            IconButton(
+              icon: const Icon(
+                Icons.delete_outline_rounded,
+                color: AppColors.error,
+              ),
+              tooltip: 'Hapus Tugas',
+              onPressed: _confirmDelete,
+            ),
+        ],
       ),
       body: isNotFound
           ? const Center(

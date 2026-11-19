@@ -18,14 +18,18 @@ Peta jalan ini membagi pengembangan **RuangRencana** menjadi tahapan terukur aga
 
 ---
 
-## Tahap 1 — Persistensi Lokal SQLite (`sqflite`) & Manajemen Semester/Mata Kuliah
+## Tahap 1 — Persistensi Lokal SQLite (`sqflite`) & Integrasi Repositori (Selesai)
 
-**Tujuan**: Mengganti seluruh `InMemory*Repository` menjadi penyimpanan lokal permanen di perangkat Android.
+**Tujuan**: Mengganti implementasi *in-memory* menjadi penyimpanan lokal relasional permanen di perangkat Android.
 
-- Menambahkan `sqflite` dan `path` pada `pubspec.yaml`.
-- Membuat `AppDatabase` (manajemen skema, versi, dan migrasi) berdasarkan [docs/DATA_MODEL.md](DATA_MODEL.md).
-- Implementasi CRUD penuh untuk **Profil Mahasiswa**, **Semester** (pindah semester aktif & arsip semester selesai), **Mata Kuliah**, dan **Slot Jadwal**.
-- Pengujian unit untuk DAO/Repository SQLite.
+- [x] Menambahkan dependensi produksi `sqflite`, `path`, dan pengujian `sqflite_common_ffi`.
+- [x] Merancang dan menguji Skema Database SQLite Versi 1 (10 tabel ternormalisasi, konstrain foreign key, dan 13 indeks query).
+- [x] Mengembangkan infrastruktur migrasi skema (`DatabaseMigrationManager`) dan transaksi atomik.
+- [x] Mengimplementasikan strategi seeding data demonstrasi idempotent (`DatabaseSeeder`).
+- [x] Mengonversi repositori `ProfileRepository`, `CourseRepository`, `ScheduleRepository`, `TaskRepository`, dan `AcademicRepository` ke implementasi SQLite (`Sqlite*Repository`).
+- [x] Mengintegrasikan persistensi penuh pada alur aplikasi (CRUD Profil, Mata Kuliah, Jadwal Kuliah, Tugas, dan Skala Nilai).
+- [x] Menjaga isolasi simulasi nilai agar tidak memodifikasi data riwayat asli.
+- [x] Pengujian unit & integrasi persistensi siklus hidup (reopening DB antar-sesi).
 
 ---
 

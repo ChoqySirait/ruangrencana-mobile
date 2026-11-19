@@ -15,7 +15,12 @@ class ProfileViewModel extends ChangeNotifier {
   late StudentProfile _profile;
   StudentProfile get profile => _profile;
 
-  void updateProfile({
+  void refresh() {
+    _profile = _repository.getProfile();
+    notifyListeners();
+  }
+
+  Future<void> updateProfile({
     required String fullName,
     required String studentId,
     required String email,
@@ -23,7 +28,7 @@ class ProfileViewModel extends ChangeNotifier {
     required String studyProgram,
     required String academicYear,
     required String activeSemesterLabel,
-  }) {
+  }) async {
     _profile = _profile.copyWith(
       fullName: fullName.trim(),
       studentId: studentId.trim(),
@@ -33,26 +38,26 @@ class ProfileViewModel extends ChangeNotifier {
       academicYear: academicYear.trim(),
       activeSemesterLabel: activeSemesterLabel.trim(),
     );
-    _repository.saveProfile(_profile);
+    await _repository.saveProfile(_profile);
     notifyListeners();
     _onProfileChanged?.call();
   }
 
-  void setClassReminder(bool enabled) {
+  Future<void> setClassReminder(bool enabled) async {
     _profile = _profile.copyWith(notifyClassReminder: enabled);
-    _repository.saveProfile(_profile);
+    await _repository.saveProfile(_profile);
     notifyListeners();
   }
 
-  void setDeadlineReminder(bool enabled) {
+  Future<void> setDeadlineReminder(bool enabled) async {
     _profile = _profile.copyWith(notifyDeadlineReminder: enabled);
-    _repository.saveProfile(_profile);
+    await _repository.saveProfile(_profile);
     notifyListeners();
   }
 
-  void setWeeklySummary(bool enabled) {
+  Future<void> setWeeklySummary(bool enabled) async {
     _profile = _profile.copyWith(notifyWeeklySummary: enabled);
-    _repository.saveProfile(_profile);
+    await _repository.saveProfile(_profile);
     notifyListeners();
   }
 }

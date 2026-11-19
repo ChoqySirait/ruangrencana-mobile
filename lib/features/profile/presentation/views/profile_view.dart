@@ -115,7 +115,7 @@ class ProfileView extends StatelessWidget {
     if (saved == true && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Profil diperbarui pada sesi lokal saat ini.'),
+          content: Text('Profil berhasil diperbarui dan disimpan ke database.'),
         ),
       );
     }

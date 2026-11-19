@@ -1,8 +1,70 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:ruangrencana/app/app.dart';
+import 'package:ruangrencana/core/database/app_database.dart';
+import 'package:ruangrencana/core/database/database_seeder.dart';
+import 'package:ruangrencana/features/academic/grades/data/repositories/academic_repository.dart';
+import 'package:ruangrencana/features/courses/data/repositories/course_repository.dart';
+import 'package:ruangrencana/features/dashboard/data/repositories/dashboard_repository.dart';
+import 'package:ruangrencana/features/profile/data/repositories/profile_repository.dart';
+import 'package:ruangrencana/features/schedule/data/repositories/schedule_repository.dart';
+import 'package:ruangrencana/features/tasks/data/repositories/task_repository.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
+  setUpAll(() {
+    sqfliteFfiInit();
+  });
+
+  late Directory tempDir;
+  late String dbPath;
+  late AppDatabase appDb;
+  late CourseRepository courseRepo;
+  late ScheduleRepository schedRepo;
+  late TaskRepository taskRepo;
+  late ProfileRepository profileRepo;
+  late AcademicRepository academicRepo;
+  late DashboardRepository dashboardRepo;
+
+  setUp(() async {
+    tempDir = await Directory.systemTemp.createTemp('widget_test_db_');
+    dbPath = '${tempDir.path}${Platform.pathSeparator}test.db';
+    appDb = AppDatabase(databaseFactory: databaseFactoryFfi);
+    final db = await appDb.open(customPath: dbPath);
+    await DatabaseSeeder.seedIfNeeded(db);
+
+    courseRepo = SqliteCourseRepository(appDatabase: appDb);
+    schedRepo = SqliteScheduleRepository(appDatabase: appDb);
+    taskRepo = SqliteTaskRepository(appDatabase: appDb);
+    profileRepo = SqliteProfileRepository(appDatabase: appDb);
+    academicRepo = SqliteAcademicRepository(
+      appDatabase: appDb,
+      courseRepository: courseRepo,
+    );
+
+    await courseRepo.load();
+    await schedRepo.load();
+    await taskRepo.load();
+    await profileRepo.load();
+    await academicRepo.load();
+
+    dashboardRepo = DefaultDashboardRepository(
+      profileRepository: profileRepo,
+      scheduleRepository: schedRepo,
+      taskRepository: taskRepo,
+      academicRepository: academicRepo,
+    );
+  });
+
+  tearDown(() async {
+    await appDb.close();
+    if (await tempDir.exists()) {
+      await tempDir.delete(recursive: true);
+    }
+  });
+
   Future<void> pumpAppAtMobileViewport(
     WidgetTester tester, {
     String initialLocation = '/beranda',
@@ -12,7 +74,18 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(RuangRencanaApp(initialLocation: initialLocation));
+    await tester.pumpWidget(
+      RuangRencanaApp(
+        initialLocation: initialLocation,
+        appDatabase: appDb,
+        courseRepository: courseRepo,
+        scheduleRepository: schedRepo,
+        taskRepository: taskRepo,
+        profileRepository: profileRepo,
+        academicRepository: academicRepo,
+        dashboardRepository: dashboardRepo,
+      ),
+    );
     await tester.pumpAndSettle();
   }
 
@@ -22,7 +95,7 @@ void main() {
     await pumpAppAtMobileViewport(tester);
 
     // 1. Beranda
-    expect(find.textContaining('Nadia'), findsOneWidget);
+    expect(find.textContaining('Choqy'), findsOneWidget);
     expect(find.text('IPS Sementara'), findsOneWidget);
     expect(find.text('IPK Kumulatif'), findsOneWidget);
     expect(find.text('SKS Aktif'), findsOneWidget);
@@ -69,7 +142,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Nadia Putri Pratama'), findsOneWidget);
+    expect(find.text('Choqy Pananda'), findsOneWidget);
     expect(find.text('Skala Konversi Nilai Kampus'), findsOneWidget);
   });
 
@@ -97,10 +170,7 @@ void main() {
   testWidgets('Rute sekunder Detail Mata Kuliah dapat dibuka dari Jadwal', (
     tester,
   ) async {
-    await pumpAppAtMobileViewport(
-      tester,
-      initialLocation: '/mata-kuliah/mk-mob',
-    );
+    await pumpAppAtMobileViewport(tester, initialLocation: '/mata-kuliah/1');
     expect(find.text('Pemrograman Mobile'), findsOneWidget);
     expect(find.text('Komponen Penilaian'), findsOneWidget);
   });

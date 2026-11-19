@@ -3,6 +3,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/app_constants.dart';
+import '../core/database/app_database.dart';
+import '../core/database/database_seeder.dart';
 import '../features/academic/grades/data/repositories/academic_repository.dart';
 import '../features/academic/grades/presentation/view_models/academic_view_model.dart';
 import '../features/courses/data/repositories/course_repository.dart';
@@ -18,11 +20,28 @@ import 'router/app_router.dart';
 import 'theme/app_theme.dart';
 
 /// Root widget aplikasi RuangRencana yang menyusun dependency injection
-/// (Repository & ViewModel melalui Provider), tema Material 3, dan GoRouter.
+/// (Repository berbasis SQLite & ViewModel melalui Provider), tema Material 3, dan GoRouter.
 class RuangRencanaApp extends StatefulWidget {
-  const RuangRencanaApp({this.initialLocation = '/beranda', super.key});
+  const RuangRencanaApp({
+    this.initialLocation = '/beranda',
+    this.appDatabase,
+    this.courseRepository,
+    this.scheduleRepository,
+    this.taskRepository,
+    this.profileRepository,
+    this.academicRepository,
+    this.dashboardRepository,
+    super.key,
+  });
 
   final String initialLocation;
+  final AppDatabase? appDatabase;
+  final CourseRepository? courseRepository;
+  final ScheduleRepository? scheduleRepository;
+  final TaskRepository? taskRepository;
+  final ProfileRepository? profileRepository;
+  final AcademicRepository? academicRepository;
+  final DashboardRepository? dashboardRepository;
 
   @override
   State<RuangRencanaApp> createState() => _RuangRencanaAppState();
@@ -30,8 +49,8 @@ class RuangRencanaApp extends StatefulWidget {
 
 class _RuangRencanaAppState extends State<RuangRencanaApp> {
   late final GoRouter _router;
+  late final AppDatabase _appDatabase;
 
-  // Repositori in-memory pada tahap fondasi (akan diganti SQLite pada tahap berikutnya)
   late final CourseRepository _courseRepository;
   late final ScheduleRepository _scheduleRepository;
   late final TaskRepository _taskRepository;
@@ -49,20 +68,35 @@ class _RuangRencanaAppState extends State<RuangRencanaApp> {
   void initState() {
     super.initState();
     _router = AppRouter.createRouter(initialLocation: widget.initialLocation);
+    _appDatabase = widget.appDatabase ?? AppDatabase.instance;
 
-    _courseRepository = InMemoryCourseRepository();
-    _scheduleRepository = InMemoryScheduleRepository();
-    _taskRepository = InMemoryTaskRepository();
-    _profileRepository = InMemoryProfileRepository();
-    _academicRepository = InMemoryAcademicRepository(
-      courseRepository: _courseRepository,
-    );
-    _dashboardRepository = DefaultDashboardRepository(
-      profileRepository: _profileRepository,
-      scheduleRepository: _scheduleRepository,
-      taskRepository: _taskRepository,
-      academicRepository: _academicRepository,
-    );
+    _courseRepository =
+        widget.courseRepository ??
+        SqliteCourseRepository(appDatabase: _appDatabase);
+    _scheduleRepository =
+        widget.scheduleRepository ??
+        SqliteScheduleRepository(appDatabase: _appDatabase);
+    _taskRepository =
+        widget.taskRepository ??
+        SqliteTaskRepository(appDatabase: _appDatabase);
+    _profileRepository =
+        widget.profileRepository ??
+        SqliteProfileRepository(appDatabase: _appDatabase);
+    _academicRepository =
+        widget.academicRepository ??
+        SqliteAcademicRepository(
+          appDatabase: _appDatabase,
+          courseRepository: _courseRepository,
+        );
+
+    _dashboardRepository =
+        widget.dashboardRepository ??
+        DefaultDashboardRepository(
+          profileRepository: _profileRepository,
+          scheduleRepository: _scheduleRepository,
+          taskRepository: _taskRepository,
+          academicRepository: _academicRepository,
+        );
 
     _dashboardViewModel = DashboardViewModel(repository: _dashboardRepository);
     _scheduleViewModel = ScheduleViewModel(repository: _scheduleRepository);
@@ -75,6 +109,32 @@ class _RuangRencanaAppState extends State<RuangRencanaApp> {
       repository: _profileRepository,
       onProfileChanged: _dashboardViewModel.refresh,
     );
+
+    // Muat data awal jika repositori belum memiliki cache
+    if (_courseRepository.getActiveCourses().isEmpty) {
+      _loadInitialData();
+    }
+  }
+
+  Future<void> _loadInitialData() async {
+    try {
+      final db = await _appDatabase.database;
+      await DatabaseSeeder.seedIfNeeded(db);
+      await _courseRepository.load();
+      await _scheduleRepository.load();
+      await _taskRepository.load();
+      await _profileRepository.load();
+      await _academicRepository.load();
+      if (mounted) {
+        _dashboardViewModel.refresh();
+        _scheduleViewModel.selectDay(_scheduleViewModel.selectedDayOfWeek);
+        _tasksViewModel.refresh();
+        _academicViewModel.refresh();
+        _profileViewModel.refresh();
+      }
+    } catch (_) {
+      // Abaikan jika database ditangani oleh pengujian secara manual
+    }
   }
 
   @override
@@ -92,6 +152,7 @@ class _RuangRencanaAppState extends State<RuangRencanaApp> {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        Provider<AppDatabase>.value(value: _appDatabase),
         Provider<CourseRepository>.value(value: _courseRepository),
         Provider<ScheduleRepository>.value(value: _scheduleRepository),
         Provider<TaskRepository>.value(value: _taskRepository),

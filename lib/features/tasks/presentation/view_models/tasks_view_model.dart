@@ -60,20 +60,24 @@ class TasksViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  void toggleCompleted(String id) {
-    _repository.toggleCompleted(id);
+  void refresh() {
+    notifyListeners();
+  }
+
+  Future<void> toggleCompleted(String id) async {
+    await _repository.toggleCompleted(id);
     notifyListeners();
     _onDataChanged?.call();
   }
 
-  void saveNewAssignment({
+  Future<void> saveNewAssignment({
     required String title,
     required String courseId,
     required String courseName,
     required DateTime dueDate,
     required AssignmentPriority priority,
     String notes = '',
-  }) {
+  }) async {
     final newItem = AssignmentItem(
       id: 'tgs-${DateTime.now().millisecondsSinceEpoch}',
       title: title.trim(),
@@ -83,13 +87,19 @@ class TasksViewModel extends ChangeNotifier {
       priority: priority,
       notes: notes.trim(),
     );
-    _repository.addAssignment(newItem);
+    await _repository.addAssignment(newItem);
     notifyListeners();
     _onDataChanged?.call();
   }
 
-  void saveEditedAssignment(AssignmentItem updated) {
-    _repository.updateAssignment(updated);
+  Future<void> saveEditedAssignment(AssignmentItem updated) async {
+    await _repository.updateAssignment(updated);
+    notifyListeners();
+    _onDataChanged?.call();
+  }
+
+  Future<void> deleteAssignment(String id) async {
+    await _repository.deleteAssignment(id);
     notifyListeners();
     _onDataChanged?.call();
   }
