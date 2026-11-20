@@ -4,7 +4,11 @@ import 'package:material_ui/material_ui.dart';
 import '../../core/widgets/app_shell_scaffold.dart';
 import '../../features/academic/grades/presentation/views/academic_view.dart';
 import '../../features/academic/simulator/presentation/views/grade_simulator_view.dart';
+import '../../features/academic/terms/presentation/views/semester_form_view.dart';
+import '../../features/academic/terms/presentation/views/semester_list_view.dart';
 import '../../features/courses/presentation/views/course_detail_view.dart';
+import '../../features/courses/presentation/views/course_form_view.dart';
+import '../../features/courses/presentation/views/courses_view.dart';
 import '../../features/dashboard/presentation/views/dashboard_view.dart';
 import '../../features/profile/presentation/views/profile_view.dart';
 import '../../features/schedule/presentation/views/schedule_view.dart';
@@ -21,8 +25,16 @@ abstract final class AppRoutes {
   static const String akademik = 'akademik';
   static const String profil = 'profil';
 
-  // Rute sekunder
+  // Rute sekunder Mata Kuliah & Semester
+  static const String courses = 'courses';
+  static const String addCourse = 'add-course';
+  static const String editCourse = 'edit-course';
   static const String courseDetail = 'course-detail';
+  static const String semesterList = 'semester-list';
+  static const String addSemester = 'add-semester';
+  static const String editSemester = 'edit-semester';
+
+  // Rute sekunder Tugas & Simulasi
   static const String addTask = 'add-task';
   static const String editTask = 'edit-task';
   static const String gradeSimulation = 'grade-simulation';
@@ -94,11 +106,53 @@ abstract final class AppRouter {
         // Rute sekunder ditampilkan di atas shell (tanpa bottom navigation bar)
         GoRoute(
           parentNavigatorKey: rootNavigatorKey,
+          path: '/mata-kuliah',
+          name: AppRoutes.courses,
+          builder: (context, state) => const CoursesView(),
+        ),
+        GoRoute(
+          parentNavigatorKey: rootNavigatorKey,
+          path: '/mata-kuliah/tambah',
+          name: AppRoutes.addCourse,
+          builder: (context, state) => const CourseFormView(),
+        ),
+        GoRoute(
+          parentNavigatorKey: rootNavigatorKey,
+          path: '/mata-kuliah/:courseId/edit',
+          name: AppRoutes.editCourse,
+          builder: (context, state) {
+            final courseId = state.pathParameters['courseId'] ?? '';
+            return CourseFormView(courseId: courseId);
+          },
+        ),
+        GoRoute(
+          parentNavigatorKey: rootNavigatorKey,
           path: '/mata-kuliah/:courseId',
           name: AppRoutes.courseDetail,
           builder: (context, state) {
             final courseId = state.pathParameters['courseId'] ?? '';
             return CourseDetailView(courseId: courseId);
+          },
+        ),
+        GoRoute(
+          parentNavigatorKey: rootNavigatorKey,
+          path: '/akademik/semester',
+          name: AppRoutes.semesterList,
+          builder: (context, state) => const SemesterListView(),
+        ),
+        GoRoute(
+          parentNavigatorKey: rootNavigatorKey,
+          path: '/akademik/semester/tambah',
+          name: AppRoutes.addSemester,
+          builder: (context, state) => const SemesterFormView(),
+        ),
+        GoRoute(
+          parentNavigatorKey: rootNavigatorKey,
+          path: '/akademik/semester/:termId/edit',
+          name: AppRoutes.editSemester,
+          builder: (context, state) {
+            final termId = state.pathParameters['termId'] ?? '';
+            return SemesterFormView(termId: termId);
           },
         ),
         GoRoute(

@@ -7,7 +7,9 @@ import '../core/database/app_database.dart';
 import '../core/database/database_seeder.dart';
 import '../features/academic/grades/data/repositories/academic_repository.dart';
 import '../features/academic/grades/presentation/view_models/academic_view_model.dart';
+import '../features/academic/terms/presentation/view_models/semester_view_model.dart';
 import '../features/courses/data/repositories/course_repository.dart';
+import '../features/courses/presentation/view_models/courses_view_model.dart';
 import '../features/dashboard/data/repositories/dashboard_repository.dart';
 import '../features/dashboard/presentation/view_models/dashboard_view_model.dart';
 import '../features/profile/data/repositories/profile_repository.dart';
@@ -63,6 +65,8 @@ class _RuangRencanaAppState extends State<RuangRencanaApp> {
   late final TasksViewModel _tasksViewModel;
   late final AcademicViewModel _academicViewModel;
   late final ProfileViewModel _profileViewModel;
+  late final SemesterViewModel _semesterViewModel;
+  late final CoursesViewModel _coursesViewModel;
 
   @override
   void initState() {
@@ -110,6 +114,36 @@ class _RuangRencanaAppState extends State<RuangRencanaApp> {
       onProfileChanged: _dashboardViewModel.refresh,
     );
 
+    _semesterViewModel = SemesterViewModel(
+      repository: _academicRepository,
+      onActiveSemesterChanged: () async {
+        await _courseRepository.load();
+        await _scheduleRepository.load();
+        await _academicRepository.load();
+        if (mounted) {
+          _academicViewModel.refresh();
+          _dashboardViewModel.refresh();
+          _scheduleViewModel.selectDay(_scheduleViewModel.selectedDayOfWeek);
+          _coursesViewModel.loadCourses();
+        }
+      },
+    );
+
+    _coursesViewModel = CoursesViewModel(
+      courseRepository: _courseRepository,
+      academicRepository: _academicRepository,
+      onCoursesChanged: () async {
+        await _courseRepository.load();
+        await _scheduleRepository.load();
+        await _academicRepository.load();
+        if (mounted) {
+          _academicViewModel.refresh();
+          _dashboardViewModel.refresh();
+          _scheduleViewModel.selectDay(_scheduleViewModel.selectedDayOfWeek);
+        }
+      },
+    );
+
     // Muat data awal jika repositori belum memiliki cache
     if (_courseRepository.getActiveCourses().isEmpty) {
       _loadInitialData();
@@ -131,6 +165,8 @@ class _RuangRencanaAppState extends State<RuangRencanaApp> {
         _tasksViewModel.refresh();
         _academicViewModel.refresh();
         _profileViewModel.refresh();
+        _semesterViewModel.refresh();
+        _coursesViewModel.loadCourses();
       }
     } catch (_) {
       // Abaikan jika database ditangani oleh pengujian secara manual
@@ -145,6 +181,8 @@ class _RuangRencanaAppState extends State<RuangRencanaApp> {
     _tasksViewModel.dispose();
     _academicViewModel.dispose();
     _profileViewModel.dispose();
+    _semesterViewModel.dispose();
+    _coursesViewModel.dispose();
     super.dispose();
   }
 
@@ -170,6 +208,12 @@ class _RuangRencanaAppState extends State<RuangRencanaApp> {
         ),
         ChangeNotifierProvider<ProfileViewModel>.value(
           value: _profileViewModel,
+        ),
+        ChangeNotifierProvider<SemesterViewModel>.value(
+          value: _semesterViewModel,
+        ),
+        ChangeNotifierProvider<CoursesViewModel>.value(
+          value: _coursesViewModel,
         ),
       ],
       child: MaterialApp.router(

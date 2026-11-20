@@ -1,19 +1,21 @@
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
-
-import '../../../../app/router/app_router.dart';
-import '../../../../app/theme/app_colors.dart';
-import '../../../../app/theme/app_spacing.dart';
-import '../../../../app/theme/app_text_styles.dart';
-import '../../../../core/widgets/info_badge.dart';
-import '../../../../core/widgets/section_header.dart';
-import '../../../academic/grades/data/repositories/academic_repository.dart';
-import '../../../tasks/data/repositories/task_repository.dart';
-import '../../../tasks/presentation/view_models/tasks_view_model.dart';
-import '../../../tasks/presentation/widgets/assignment_card.dart';
-import '../../data/repositories/course_repository.dart';
-import '../view_models/course_detail_view_model.dart';
+import 'package:ruangrencana/app/router/app_router.dart';
+import 'package:ruangrencana/app/theme/app_colors.dart';
+import 'package:ruangrencana/app/theme/app_spacing.dart';
+import 'package:ruangrencana/app/theme/app_text_styles.dart';
+import 'package:ruangrencana/core/widgets/info_badge.dart';
+import 'package:ruangrencana/core/widgets/section_header.dart';
+import 'package:ruangrencana/features/academic/grades/data/repositories/academic_repository.dart';
+import 'package:ruangrencana/features/academic/grades/presentation/view_models/academic_view_model.dart';
+import 'package:ruangrencana/features/courses/data/repositories/course_repository.dart';
+import 'package:ruangrencana/features/courses/presentation/view_models/course_detail_view_model.dart';
+import 'package:ruangrencana/features/dashboard/presentation/view_models/dashboard_view_model.dart';
+import 'package:ruangrencana/features/schedule/presentation/view_models/schedule_view_model.dart';
+import 'package:ruangrencana/features/tasks/data/repositories/task_repository.dart';
+import 'package:ruangrencana/features/tasks/presentation/view_models/tasks_view_model.dart';
+import 'package:ruangrencana/features/tasks/presentation/widgets/assignment_card.dart';
 
 /// Layar sekunder Detail Mata Kuliah: informasi kelas, komponen bobot penilaian,
 /// status nilai sementara/akhir, dan daftar tugas terkait mata kuliah tersebut.
@@ -30,6 +32,14 @@ class CourseDetailView extends StatelessWidget {
         courseRepository: context.read<CourseRepository>(),
         taskRepository: context.read<TaskRepository>(),
         academicRepository: context.read<AcademicRepository>(),
+        onCourseUpdated: () async {
+          if (context.mounted) {
+            context.read<DashboardViewModel>().refresh();
+            context.read<AcademicViewModel>().refresh();
+            final schedVm = context.read<ScheduleViewModel>();
+            schedVm.selectDay(schedVm.selectedDayOfWeek);
+          }
+        },
       ),
       child: const _CourseDetailBody(),
     );
@@ -63,7 +73,132 @@ class _CourseDetailBody extends StatelessWidget {
         .toList(growable: false);
 
     return Scaffold(
-      appBar: AppBar(title: Text(course.code)),
+      appBar: AppBar(
+        title: Text(course.code),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.edit_outlined),
+            tooltip: 'Edit Mata Kuliah',
+            onPressed: () async {
+              await context.pushNamed(
+                AppRoutes.editCourse,
+                pathParameters: {'courseId': course.id},
+              );
+              vm.load();
+            },
+          ),
+          PopupMenuButton<String>(
+            onSelected: (val) async {
+              switch (val) {
+                case 'archive':
+                  final success = await vm.archiveCourse();
+                  if (context.mounted && success) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Mata kuliah berhasil diarsipkan.'),
+                      ),
+                    );
+                  }
+                  break;
+                case 'unarchive':
+                  final success = await vm.unarchiveCourse();
+                  if (context.mounted && success) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Arsip mata kuliah dibuka kembali.'),
+                      ),
+                    );
+                  }
+                  break;
+                case 'delete':
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Hapus Mata Kuliah?'),
+                      content: Text(
+                        'Apakah Anda yakin ingin menghapus "${course.name}"? '
+                        'Jika mata kuliah memiliki riwayat akademik, pertimbangkan untuk mengarsipkannya.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Batal'),
+                        ),
+                        FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.error,
+                          ),
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Hapus'),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  if (confirm == true && context.mounted) {
+                    final success = await vm.deleteCourse(force: true);
+                    if (context.mounted) {
+                      if (success) {
+                        context.pop();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Mata kuliah berhasil dihapus.'),
+                          ),
+                        );
+                      } else if (vm.errorMessage != null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(vm.errorMessage!),
+                            backgroundColor: AppColors.error,
+                          ),
+                        );
+                      }
+                    }
+                  }
+                  break;
+              }
+            },
+            itemBuilder: (ctx) => [
+              if (!course.isArchived)
+                const PopupMenuItem(
+                  value: 'archive',
+                  child: Row(
+                    children: [
+                      Icon(Icons.archive_outlined, size: 18),
+                      SizedBox(width: 8),
+                      Text('Arsipkan'),
+                    ],
+                  ),
+                )
+              else
+                const PopupMenuItem(
+                  value: 'unarchive',
+                  child: Row(
+                    children: [
+                      Icon(Icons.unarchive_outlined, size: 18),
+                      SizedBox(width: 8),
+                      Text('Buka Arsip'),
+                    ],
+                  ),
+                ),
+              PopupMenuItem(
+                value: 'delete',
+                child: Row(
+                  children: const [
+                    Icon(
+                      Icons.delete_outline,
+                      size: 18,
+                      color: AppColors.error,
+                    ),
+                    SizedBox(width: 8),
+                    Text('Hapus', style: TextStyle(color: AppColors.error)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.pageHorizontal),
         children: [
@@ -83,14 +218,20 @@ class _CourseDetailBody extends StatelessWidget {
                         label: '${course.sks} SKS',
                         tone: BadgeTone.secondary,
                       ),
-                      InfoBadge(
-                        label: calc.isFinalReady
-                            ? 'Nilai Final'
-                            : 'Nilai Sementara (${calc.gradedWeightPercent.toStringAsFixed(0)}%)',
-                        tone: calc.isFinalReady
-                            ? BadgeTone.secondary
-                            : BadgeTone.warning,
-                      ),
+                      if (course.isArchived)
+                        const InfoBadge(
+                          label: 'Diarsipkan',
+                          tone: BadgeTone.warning,
+                        )
+                      else
+                        InfoBadge(
+                          label: calc.isFinalReady
+                              ? 'Nilai Final'
+                              : 'Nilai Sementara (${calc.gradedWeightPercent.toStringAsFixed(0)}%)',
+                          tone: calc.isFinalReady
+                              ? BadgeTone.secondary
+                              : BadgeTone.warning,
+                        ),
                     ],
                   ),
                   const SizedBox(height: AppSpacing.sm),
@@ -98,7 +239,9 @@ class _CourseDetailBody extends StatelessWidget {
                   const SizedBox(height: AppSpacing.sm),
                   _InfoRow(
                     icon: Icons.person_outline_rounded,
-                    text: course.lecturer,
+                    text: course.lecturer.isNotEmpty
+                        ? course.lecturer
+                        : 'Dosen belum ditentukan',
                   ),
                   const SizedBox(height: AppSpacing.xs),
                   _InfoRow(
@@ -185,41 +328,52 @@ class _CourseDetailBody extends StatelessWidget {
           // Komponen Penilaian
           const SectionHeader(title: 'Komponen Penilaian'),
           const SizedBox(height: AppSpacing.xs),
-          Card(
-            child: Column(
-              children: [
-                for (
-                  var i = 0;
-                  i < course.assessmentComponents.length;
-                  i++
-                ) ...[
-                  if (i > 0) const Divider(),
-                  ListTile(
-                    title: Text(
-                      course.assessmentComponents[i].name,
-                      style: AppTextStyles.titleSmall,
-                    ),
-                    subtitle: Text(
-                      'Bobot ${course.assessmentComponents[i].weightPercent.toStringAsFixed(0)}% • ${course.assessmentComponents[i].isMandatory ? 'Wajib' : 'Opsional'}',
-                      style: AppTextStyles.bodySmall,
-                    ),
-                    trailing: course.assessmentComponents[i].hasScore
-                        ? Text(
-                            course.assessmentComponents[i].score!
-                                .toStringAsFixed(0),
-                            style: AppTextStyles.titleMedium.copyWith(
-                              color: AppColors.primaryNavy,
+          if (course.assessmentComponents.isEmpty)
+            const Card(
+              child: Padding(
+                padding: EdgeInsets.all(AppSpacing.md),
+                child: Text(
+                  'Belum ada komponen penilaian untuk mata kuliah ini.',
+                  style: AppTextStyles.bodySmall,
+                ),
+              ),
+            )
+          else
+            Card(
+              child: Column(
+                children: [
+                  for (
+                    var i = 0;
+                    i < course.assessmentComponents.length;
+                    i++
+                  ) ...[
+                    if (i > 0) const Divider(),
+                    ListTile(
+                      title: Text(
+                        course.assessmentComponents[i].name,
+                        style: AppTextStyles.titleSmall,
+                      ),
+                      subtitle: Text(
+                        'Bobot ${course.assessmentComponents[i].weightPercent.toStringAsFixed(0)}% • ${course.assessmentComponents[i].isMandatory ? 'Wajib' : 'Opsional'}',
+                        style: AppTextStyles.bodySmall,
+                      ),
+                      trailing: course.assessmentComponents[i].hasScore
+                          ? Text(
+                              course.assessmentComponents[i].score!
+                                  .toStringAsFixed(0),
+                              style: AppTextStyles.titleMedium.copyWith(
+                                color: AppColors.primaryNavy,
+                              ),
+                            )
+                          : const InfoBadge(
+                              label: 'Belum dinilai',
+                              tone: BadgeTone.neutral,
                             ),
-                          )
-                        : const InfoBadge(
-                            label: 'Belum dinilai',
-                            tone: BadgeTone.neutral,
-                          ),
-                  ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
 
           const SizedBox(height: AppSpacing.lg),
 

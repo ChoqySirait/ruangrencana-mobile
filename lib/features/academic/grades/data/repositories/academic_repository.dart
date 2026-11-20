@@ -1,15 +1,46 @@
 import 'package:ruangrencana/core/database/app_database.dart';
 import 'package:ruangrencana/core/database/database_schema.dart';
+import 'package:ruangrencana/core/errors/app_failure.dart';
 import 'package:ruangrencana/core/utils/academic_calculator.dart';
+import 'package:ruangrencana/features/academic/terms/data/models/academic_term_item.dart';
 import 'package:ruangrencana/features/courses/data/repositories/course_repository.dart';
+import 'package:sqflite/sqflite.dart';
 
 import '../models/academic_overview.dart';
 
-/// Kontrak akses data ringkasan nilai dan performa akademik.
+/// Kontrak akses data ringkasan nilai, performa akademik, dan manajemen semester.
 abstract class AcademicRepository {
   AcademicOverview getAcademicOverview();
   List<GradeScaleRule> getActiveGradingScale();
   Future<void> load();
+
+  // Operasi CRUD Semester Akademik
+  List<AcademicTermItem> getAllSemesters();
+  AcademicTermItem? getActiveSemester();
+  AcademicTermItem? getSemesterById(int id);
+
+  Future<int> createSemester({
+    required String academicYear,
+    required String semesterName,
+    required int semesterNumber,
+    DateTime? startDate,
+    DateTime? endDate,
+    int? gradingScaleId,
+    bool makeActive = false,
+  });
+
+  Future<void> updateSemester({
+    required int id,
+    required String academicYear,
+    required String semesterName,
+    required int semesterNumber,
+    DateTime? startDate,
+    DateTime? endDate,
+    int? gradingScaleId,
+  });
+
+  Future<void> setActiveSemester(int id);
+  Future<void> deleteSemester(int id);
 
   // Operasi CRUD Skala Nilai
   Future<int> createGradingScale({
@@ -39,10 +70,31 @@ class SqliteAcademicRepository implements AcademicRepository {
   final CourseRepository courseRepository;
 
   final List<GradeScaleRule> _activeScaleRules = [];
+  final List<AcademicTermItem> _cachedSemesters = [];
   String _activeScaleName = 'Contoh Skala 4.00 (Dapat Dikonfigurasi)';
   String _activeSemesterLabel = 'Semester 4 • Genap 2025/2026';
   final List<SemesterGpaRecord> _historicalSemesters = [];
   int _targetGraduationSks = 144;
+
+  @override
+  List<AcademicTermItem> getAllSemesters() =>
+      List.unmodifiable(_cachedSemesters);
+
+  @override
+  AcademicTermItem? getActiveSemester() {
+    for (final term in _cachedSemesters) {
+      if (term.isActive) return term;
+    }
+    return null;
+  }
+
+  @override
+  AcademicTermItem? getSemesterById(int id) {
+    for (final term in _cachedSemesters) {
+      if (term.id == id) return term;
+    }
+    return null;
+  }
 
   @override
   List<GradeScaleRule> getActiveGradingScale() =>
@@ -52,22 +104,54 @@ class SqliteAcademicRepository implements AcademicRepository {
   Future<void> load() async {
     final db = await appDatabase.database;
 
-    // 1. Ambil semester aktif
-    final activeTerms = await db.query(
-      DatabaseSchema.tableAcademicTerms,
-      where: 'is_active = 1',
-      limit: 1,
-    );
+    // 1. Ambil seluruh data semester beserta agregasi jumlah mata kuliah & total SKS
+    final termRows = await db.rawQuery('''
+      SELECT t.*,
+        (SELECT COUNT(*) FROM ${DatabaseSchema.tableCourses} c 
+         WHERE c.academic_term_id = t.id AND c.archived_at IS NULL) as course_count,
+        (SELECT COALESCE(SUM(c.credits), 0) FROM ${DatabaseSchema.tableCourses} c 
+         WHERE c.academic_term_id = t.id AND c.archived_at IS NULL) as total_credits
+      FROM ${DatabaseSchema.tableAcademicTerms} t
+      ORDER BY t.semester_number ASC
+    ''');
 
+    _cachedSemesters
+      ..clear()
+      ..addAll(
+        termRows.map((r) {
+          final startStr = r['start_date'] as String?;
+          final endStr = r['end_date'] as String?;
+          return AcademicTermItem(
+            id: r['id'] as int,
+            academicYear: r['academic_year'] as String,
+            semesterName: r['semester_name'] as String,
+            semesterNumber: r['semester_number'] as int,
+            startDate: startStr != null ? DateTime.tryParse(startStr) : null,
+            endDate: endStr != null ? DateTime.tryParse(endStr) : null,
+            gradingScaleId: r['grading_scale_id'] as int,
+            isActive: (r['is_active'] as int) == 1,
+            createdAt: DateTime.parse(r['created_at'] as String),
+            updatedAt: DateTime.parse(r['updated_at'] as String),
+            courseCount: (r['course_count'] as int?) ?? 0,
+            totalCredits: (r['total_credits'] as int?) ?? 0,
+          );
+        }),
+      );
+
+    // 2. Ambil semester aktif
+    final activeTerm = getActiveSemester();
     int scaleId = 1;
-    if (activeTerms.isNotEmpty) {
-      final term = activeTerms.first;
-      _activeSemesterLabel =
-          '${term['semester_name']} • ${term['academic_year']}';
-      scaleId = term['grading_scale_id'] as int;
+    if (activeTerm != null) {
+      _activeSemesterLabel = activeTerm.fullLabel;
+      scaleId = activeTerm.gradingScaleId;
+    } else if (_cachedSemesters.isNotEmpty) {
+      _activeSemesterLabel = _cachedSemesters.last.fullLabel;
+      scaleId = _cachedSemesters.last.gradingScaleId;
+    } else {
+      _activeSemesterLabel = 'Belum ada semester';
     }
 
-    // 2. Ambil master skala nilai
+    // 3. Ambil master skala nilai
     final scaleRows = await db.query(
       DatabaseSchema.tableGradingScales,
       where: 'id = ?',
@@ -79,7 +163,7 @@ class SqliteAcademicRepository implements AcademicRepository {
       _activeScaleName = scaleRows.first['scale_name'] as String;
     }
 
-    // 3. Ambil rentang nilai (rules)
+    // 4. Ambil rentang nilai (rules)
     final rangeRows = await db.query(
       DatabaseSchema.tableGradingScaleRanges,
       where: 'grading_scale_id = ?',
@@ -100,7 +184,7 @@ class SqliteAcademicRepository implements AcademicRepository {
         }),
       );
 
-    // 4. Target SKS kelulusan dari preferensi aplikasi murni
+    // 5. Target SKS kelulusan dari preferensi aplikasi murni
     final prefRows = await db.query(DatabaseSchema.tableAppPreferences);
     final prefMap = {
       for (final r in prefRows)
@@ -112,19 +196,15 @@ class SqliteAcademicRepository implements AcademicRepository {
           int.tryParse(prefMap['target_graduation_sks']!) ?? 144;
     }
 
-    // 5. Hitung riwayat semester lampau secara otoritatif dari academic_terms dan courses
-    final pastTerms = await db.query(
-      DatabaseSchema.tableAcademicTerms,
-      where: 'is_active = 0',
-      orderBy: 'semester_number ASC',
-    );
+    // 6. Hitung riwayat semester lampau secara otoritatif dari academic_terms dan courses
+    final pastTerms = _cachedSemesters.where((t) => !t.isActive).toList();
 
     _historicalSemesters.clear();
 
     for (final term in pastTerms) {
-      final termId = term['id'] as int;
-      final semNumber = term['semester_number'] as int;
-      final termScaleId = term['grading_scale_id'] as int;
+      final termId = term.id;
+      final semNumber = term.semesterNumber;
+      final termScaleId = term.gradingScaleId;
 
       // Ambil aturan skala nilai untuk semester ini
       final List<GradeScaleRule> termRules;
@@ -287,6 +367,230 @@ class SqliteAcademicRepository implements AcademicRepository {
   }
 
   @override
+  Future<int> createSemester({
+    required String academicYear,
+    required String semesterName,
+    required int semesterNumber,
+    DateTime? startDate,
+    DateTime? endDate,
+    int? gradingScaleId,
+    bool makeActive = false,
+  }) async {
+    _validateSemesterInput(
+      academicYear: academicYear,
+      semesterName: semesterName,
+      semesterNumber: semesterNumber,
+      startDate: startDate,
+      endDate: endDate,
+    );
+
+    final db = await appDatabase.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final scaleId = gradingScaleId ?? 1;
+
+    final termId = await db.transaction<int>((txn) async {
+      if (makeActive) {
+        // Deaktivasi seluruh semester aktif terlebih dahulu
+        await txn.update(DatabaseSchema.tableAcademicTerms, {
+          'is_active': 0,
+          'updated_at': now,
+        });
+      }
+
+      final id = await txn.insert(DatabaseSchema.tableAcademicTerms, {
+        'academic_year': academicYear.trim(),
+        'semester_name': semesterName.trim(),
+        'semester_number': semesterNumber,
+        'start_date': startDate?.toIso8601String().substring(0, 10),
+        'end_date': endDate?.toIso8601String().substring(0, 10),
+        'grading_scale_id': scaleId,
+        'is_active': makeActive ? 1 : 0,
+        'created_at': now,
+        'updated_at': now,
+      });
+
+      return id;
+    });
+
+    await courseRepository.load();
+    await load();
+    return termId;
+  }
+
+  @override
+  Future<void> updateSemester({
+    required int id,
+    required String academicYear,
+    required String semesterName,
+    required int semesterNumber,
+    DateTime? startDate,
+    DateTime? endDate,
+    int? gradingScaleId,
+  }) async {
+    _validateSemesterInput(
+      academicYear: academicYear,
+      semesterName: semesterName,
+      semesterNumber: semesterNumber,
+      startDate: startDate,
+      endDate: endDate,
+    );
+
+    final db = await appDatabase.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    final updateData = <String, dynamic>{
+      'academic_year': academicYear.trim(),
+      'semester_name': semesterName.trim(),
+      'semester_number': semesterNumber,
+      'start_date': startDate?.toIso8601String().substring(0, 10),
+      'end_date': endDate?.toIso8601String().substring(0, 10),
+      'updated_at': now,
+    };
+
+    if (gradingScaleId != null) {
+      updateData['grading_scale_id'] = gradingScaleId;
+    }
+
+    final affected = await db.update(
+      DatabaseSchema.tableAcademicTerms,
+      updateData,
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+
+    if (affected == 0) {
+      throw AppFailure(
+        'Semester akademik tidak ditemukan.',
+        code: 'SEMESTER_NOT_FOUND',
+      );
+    }
+
+    await courseRepository.load();
+    await load();
+  }
+
+  @override
+  Future<void> setActiveSemester(int id) async {
+    final db = await appDatabase.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    await db.transaction((txn) async {
+      final term = await txn.query(
+        DatabaseSchema.tableAcademicTerms,
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+
+      if (term.isEmpty) {
+        throw AppFailure(
+          'Semester target tidak ditemukan.',
+          code: 'SEMESTER_NOT_FOUND',
+        );
+      }
+
+      // 1. Deaktivasi semua semester yang ada secara atomik
+      await txn.update(DatabaseSchema.tableAcademicTerms, {
+        'is_active': 0,
+        'updated_at': now,
+      });
+
+      // 2. Aktifkan semester terpilih
+      await txn.update(
+        DatabaseSchema.tableAcademicTerms,
+        {'is_active': 1, 'updated_at': now},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    });
+
+    // Sinkronkan ulang repositori mata kuliah dan performa akademik
+    await courseRepository.load();
+    await load();
+  }
+
+  @override
+  Future<void> deleteSemester(int id) async {
+    final db = await appDatabase.database;
+
+    final termRows = await db.query(
+      DatabaseSchema.tableAcademicTerms,
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+
+    if (termRows.isEmpty) {
+      throw AppFailure('Semester tidak ditemukan.', code: 'SEMESTER_NOT_FOUND');
+    }
+
+    final term = termRows.first;
+    if ((term['is_active'] as int) == 1) {
+      throw AppFailure(
+        'Semester aktif tidak dapat dihapus. Aktifkan semester lain terlebih dahulu sebelum menghapus.',
+        code: 'CANNOT_DELETE_ACTIVE_SEMESTER',
+      );
+    }
+
+    final courseCount =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM ${DatabaseSchema.tableCourses} WHERE academic_term_id = ?',
+            [id],
+          ),
+        ) ??
+        0;
+
+    if (courseCount > 0) {
+      throw AppFailure(
+        'Semester tidak dapat dihapus karena masih memuat $courseCount mata kuliah.',
+        code: 'SEMESTER_CONTAINS_COURSES',
+      );
+    }
+
+    await db.delete(
+      DatabaseSchema.tableAcademicTerms,
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+
+    await load();
+  }
+
+  void _validateSemesterInput({
+    required String academicYear,
+    required String semesterName,
+    required int semesterNumber,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) {
+    if (academicYear.trim().isEmpty) {
+      throw AppFailure(
+        'Tahun akademik tidak boleh kosong.',
+        code: 'INVALID_ACADEMIC_YEAR',
+      );
+    }
+    if (semesterName.trim().isEmpty) {
+      throw AppFailure(
+        'Nama semester tidak boleh kosong.',
+        code: 'INVALID_SEMESTER_NAME',
+      );
+    }
+    if (semesterNumber <= 0) {
+      throw AppFailure(
+        'Nomor semester harus bernilai positif (minimal 1).',
+        code: 'INVALID_SEMESTER_NUMBER',
+      );
+    }
+    if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
+      throw AppFailure(
+        'Tanggal mulai semester harus lebih awal dari tanggal selesai.',
+        code: 'INVALID_DATE_RANGE',
+      );
+    }
+  }
+
+  @override
   Future<int> createGradingScale({
     required String name,
     bool isDefault = false,
@@ -340,11 +644,12 @@ class SqliteAcademicRepository implements AcademicRepository {
   }
 }
 
-/// Implementasi in-memory untuk fallback atau testing.
+/// Implementasi in-memory untuk fallback atau testing terisolasi.
 class InMemoryAcademicRepository implements AcademicRepository {
   InMemoryAcademicRepository({required this.courseRepository});
 
   final CourseRepository courseRepository;
+  final List<AcademicTermItem> _semesters = [];
 
   static const List<GradeScaleRule> sampleScale = [
     GradeScaleRule(minScore: 85, maxScore: 100, letter: 'A', gradePoint: 4.00),
@@ -395,6 +700,138 @@ class InMemoryAcademicRepository implements AcademicRepository {
 
   @override
   List<GradeScaleRule> getActiveGradingScale() => sampleScale;
+
+  @override
+  List<AcademicTermItem> getAllSemesters() => List.unmodifiable(_semesters);
+
+  @override
+  AcademicTermItem? getActiveSemester() {
+    for (final s in _semesters) {
+      if (s.isActive) return s;
+    }
+    return null;
+  }
+
+  @override
+  AcademicTermItem? getSemesterById(int id) {
+    for (final s in _semesters) {
+      if (s.id == id) return s;
+    }
+    return null;
+  }
+
+  @override
+  Future<int> createSemester({
+    required String academicYear,
+    required String semesterName,
+    required int semesterNumber,
+    DateTime? startDate,
+    DateTime? endDate,
+    int? gradingScaleId,
+    bool makeActive = false,
+  }) async {
+    if (academicYear.trim().isEmpty) {
+      throw AppFailure(
+        'Tahun akademik tidak boleh kosong.',
+        code: 'INVALID_ACADEMIC_YEAR',
+      );
+    }
+    if (semesterName.trim().isEmpty) {
+      throw AppFailure(
+        'Nama semester tidak boleh kosong.',
+        code: 'INVALID_SEMESTER_NAME',
+      );
+    }
+    if (semesterNumber <= 0) {
+      throw AppFailure(
+        'Nomor semester harus bernilai positif (minimal 1).',
+        code: 'INVALID_SEMESTER_NUMBER',
+      );
+    }
+    if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
+      throw AppFailure(
+        'Tanggal mulai semester harus lebih awal dari tanggal selesai.',
+        code: 'INVALID_DATE_RANGE',
+      );
+    }
+
+    if (makeActive) {
+      for (var i = 0; i < _semesters.length; i++) {
+        _semesters[i] = _semesters[i].copyWith(isActive: false);
+      }
+    }
+
+    final now = DateTime.now();
+    final newId = _semesters.length + 1;
+    final item = AcademicTermItem(
+      id: newId,
+      academicYear: academicYear,
+      semesterName: semesterName,
+      semesterNumber: semesterNumber,
+      startDate: startDate,
+      endDate: endDate,
+      gradingScaleId: gradingScaleId ?? 1,
+      isActive: makeActive || _semesters.isEmpty,
+      createdAt: now,
+      updatedAt: now,
+    );
+    _semesters.add(item);
+    return newId;
+  }
+
+  @override
+  Future<void> updateSemester({
+    required int id,
+    required String academicYear,
+    required String semesterName,
+    required int semesterNumber,
+    DateTime? startDate,
+    DateTime? endDate,
+    int? gradingScaleId,
+  }) async {
+    final index = _semesters.indexWhere((s) => s.id == id);
+    if (index == -1) {
+      throw AppFailure('Semester tidak ditemukan.', code: 'SEMESTER_NOT_FOUND');
+    }
+    _semesters[index] = _semesters[index].copyWith(
+      academicYear: academicYear,
+      semesterName: semesterName,
+      semesterNumber: semesterNumber,
+      startDate: startDate,
+      endDate: endDate,
+      gradingScaleId: gradingScaleId,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  @override
+  Future<void> setActiveSemester(int id) async {
+    final index = _semesters.indexWhere((s) => s.id == id);
+    if (index == -1) {
+      throw AppFailure(
+        'Semester target tidak ditemukan.',
+        code: 'SEMESTER_NOT_FOUND',
+      );
+    }
+    for (var i = 0; i < _semesters.length; i++) {
+      _semesters[i] = _semesters[i].copyWith(isActive: _semesters[i].id == id);
+    }
+  }
+
+  @override
+  Future<void> deleteSemester(int id) async {
+    final term = getSemesterById(id);
+    if (term == null) {
+      throw AppFailure('Semester tidak ditemukan.', code: 'SEMESTER_NOT_FOUND');
+    }
+    if (term.isActive) {
+      throw AppFailure(
+        'Semester aktif tidak dapat dihapus.',
+        code: 'CANNOT_DELETE_ACTIVE_SEMESTER',
+      );
+    }
+    _semesters.removeWhere((s) => s.id == id);
+  }
 
   @override
   AcademicOverview getAcademicOverview() {

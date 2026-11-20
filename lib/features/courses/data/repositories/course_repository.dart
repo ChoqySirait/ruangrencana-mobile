@@ -1,11 +1,10 @@
+import 'package:ruangrencana/core/database/app_database.dart';
+import 'package:ruangrencana/core/database/database_schema.dart';
+import 'package:ruangrencana/core/errors/app_failure.dart';
+import 'package:ruangrencana/core/utils/academic_calculator.dart';
+import 'package:ruangrencana/core/utils/date_formatter.dart';
+import 'package:ruangrencana/features/courses/data/models/course_item.dart';
 import 'package:sqflite/sqflite.dart';
-
-import '../../../../core/database/app_database.dart';
-import '../../../../core/database/database_schema.dart';
-import '../../../../core/errors/app_failure.dart';
-import '../../../../core/utils/academic_calculator.dart';
-import '../../../../core/utils/date_formatter.dart';
-import '../models/course_item.dart';
 
 /// Statistik rekaman terkait suatu mata kuliah untuk perlindungan integritas akademik.
 class CourseDependentStats {
@@ -37,6 +36,10 @@ class CourseDependentStats {
 abstract class CourseRepository {
   List<CourseItem> getActiveCourses();
   CourseItem? getCourseById(String id);
+  Future<List<CourseItem>> getCoursesBySemester(
+    int termId, {
+    bool includeArchived = false,
+  });
   Future<void> load();
 
   // Operasi CRUD
@@ -54,10 +57,12 @@ abstract class CourseRepository {
     required String name,
     required int credits,
     required String lecturer,
+    int? termId,
   });
 
   Future<CourseDependentStats> getDependentStats(String id);
   Future<void> archiveCourse(String id);
+  Future<void> unarchiveCourse(String id);
   Future<void> deleteCourse(String id, {bool force = false});
 
   Future<int> addAssessmentComponent({
@@ -122,7 +127,46 @@ class SqliteCourseRepository implements CourseRepository {
       orderBy: 'course_code ASC',
     );
 
-    final loaded = <CourseItem>[];
+    final loaded = await _hydrateCourses(db, courseRows);
+
+    _cachedCourses
+      ..clear()
+      ..addAll(loaded);
+  }
+
+  @override
+  Future<List<CourseItem>> getCoursesBySemester(
+    int termId, {
+    bool includeArchived = false,
+  }) async {
+    final db = await appDatabase.database;
+
+    final String whereClause;
+    final List<Object?> whereArgs;
+
+    if (includeArchived) {
+      whereClause = 'academic_term_id = ?';
+      whereArgs = [termId];
+    } else {
+      whereClause = 'academic_term_id = ? AND archived_at IS NULL';
+      whereArgs = [termId];
+    }
+
+    final courseRows = await db.query(
+      DatabaseSchema.tableCourses,
+      where: whereClause,
+      whereArgs: whereArgs,
+      orderBy: 'course_code ASC',
+    );
+
+    return _hydrateCourses(db, courseRows);
+  }
+
+  Future<List<CourseItem>> _hydrateCourses(
+    DatabaseExecutor db,
+    List<Map<String, Object?>> courseRows,
+  ) async {
+    final result = <CourseItem>[];
 
     for (final row in courseRows) {
       final courseId = row['id'] as int;
@@ -172,7 +216,7 @@ class SqliteCourseRepository implements CourseRepository {
           })
           .toList(growable: false);
 
-      loaded.add(
+      result.add(
         CourseItem(
           id: courseId.toString(),
           code: row['course_code'] as String,
@@ -182,13 +226,13 @@ class SqliteCourseRepository implements CourseRepository {
           room: room,
           scheduleLabel: scheduleLabel,
           assessmentComponents: components,
+          termId: (row['academic_term_id'] as int?) ?? 0,
+          isArchived: row['archived_at'] != null,
         ),
       );
     }
 
-    _cachedCourses
-      ..clear()
-      ..addAll(loaded);
+    return result;
   }
 
   @override
@@ -199,12 +243,43 @@ class SqliteCourseRepository implements CourseRepository {
     required int credits,
     required String lecturer,
   }) async {
+    _validateCourseInput(code: code, name: name, credits: credits);
+
     final db = await appDatabase.database;
     final now = DateTime.now().toUtc().toIso8601String();
+    final trimmedCode = code.trim();
+
+    // Verifikasi semester target ada
+    final termCheck = await db.query(
+      DatabaseSchema.tableAcademicTerms,
+      where: 'id = ?',
+      whereArgs: [termId],
+      limit: 1,
+    );
+    if (termCheck.isEmpty) {
+      throw AppFailure(
+        'Semester akademik tidak valid atau tidak ditemukan.',
+        code: 'INVALID_TERM',
+      );
+    }
+
+    // Verifikasi keunikan kode mata kuliah dalam satu semester
+    final duplicate = await db.query(
+      DatabaseSchema.tableCourses,
+      where: 'academic_term_id = ? AND LOWER(course_code) = LOWER(?)',
+      whereArgs: [termId, trimmedCode],
+      limit: 1,
+    );
+    if (duplicate.isNotEmpty) {
+      throw AppFailure(
+        'Kode mata kuliah "$trimmedCode" sudah terdaftar pada semester ini.',
+        code: 'DUPLICATE_COURSE_CODE',
+      );
+    }
 
     final id = await db.insert(DatabaseSchema.tableCourses, {
       'academic_term_id': termId,
-      'course_code': code.trim(),
+      'course_code': trimmedCode,
       'course_name': name.trim(),
       'credits': credits,
       'lecturer_name': lecturer.trim(),
@@ -223,24 +298,92 @@ class SqliteCourseRepository implements CourseRepository {
     required String name,
     required int credits,
     required String lecturer,
+    int? termId,
   }) async {
+    _validateCourseInput(code: code, name: name, credits: credits);
+
     final db = await appDatabase.database;
     final now = DateTime.now().toUtc().toIso8601String();
+    final cId = int.tryParse(id) ?? id;
+    final trimmedCode = code.trim();
+
+    final currentRows = await db.query(
+      DatabaseSchema.tableCourses,
+      where: 'id = ?',
+      whereArgs: [cId],
+      limit: 1,
+    );
+
+    if (currentRows.isEmpty) {
+      throw AppFailure(
+        'Mata kuliah tidak ditemukan.',
+        code: 'COURSE_NOT_FOUND',
+      );
+    }
+
+    final targetTermId =
+        termId ?? (currentRows.first['academic_term_id'] as int);
+
+    // Verifikasi keunikan kode mata kuliah dalam semester yang sama (abaikan ID diri sendiri)
+    final duplicate = await db.query(
+      DatabaseSchema.tableCourses,
+      where:
+          'academic_term_id = ? AND LOWER(course_code) = LOWER(?) AND id != ?',
+      whereArgs: [targetTermId, trimmedCode, cId],
+      limit: 1,
+    );
+
+    if (duplicate.isNotEmpty) {
+      throw AppFailure(
+        'Kode mata kuliah "$trimmedCode" sudah terdaftar pada semester ini.',
+        code: 'DUPLICATE_COURSE_CODE',
+      );
+    }
+
+    final updateData = <String, dynamic>{
+      'course_code': trimmedCode,
+      'course_name': name.trim(),
+      'credits': credits,
+      'lecturer_name': lecturer.trim(),
+      'updated_at': now,
+    };
+    if (termId != null) {
+      updateData['academic_term_id'] = termId;
+    }
 
     await db.update(
       DatabaseSchema.tableCourses,
-      {
-        'course_code': code.trim(),
-        'course_name': name.trim(),
-        'credits': credits,
-        'lecturer_name': lecturer.trim(),
-        'updated_at': now,
-      },
+      updateData,
       where: 'id = ?',
-      whereArgs: [int.tryParse(id) ?? id],
+      whereArgs: [cId],
     );
 
     await load();
+  }
+
+  void _validateCourseInput({
+    required String code,
+    required String name,
+    required int credits,
+  }) {
+    if (code.trim().isEmpty) {
+      throw AppFailure(
+        'Kode mata kuliah tidak boleh kosong.',
+        code: 'INVALID_COURSE_CODE',
+      );
+    }
+    if (name.trim().isEmpty) {
+      throw AppFailure(
+        'Nama mata kuliah tidak boleh kosong.',
+        code: 'INVALID_COURSE_NAME',
+      );
+    }
+    if (credits <= 0) {
+      throw AppFailure(
+        'SKS harus berupa bilangan bulat positif (minimal 1 SKS).',
+        code: 'INVALID_CREDITS',
+      );
+    }
   }
 
   @override
@@ -251,6 +394,21 @@ class SqliteCourseRepository implements CourseRepository {
     await db.update(
       DatabaseSchema.tableCourses,
       {'archived_at': now, 'updated_at': now},
+      where: 'id = ?',
+      whereArgs: [int.tryParse(id) ?? id],
+    );
+
+    await load();
+  }
+
+  @override
+  Future<void> unarchiveCourse(String id) async {
+    final db = await appDatabase.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    await db.update(
+      DatabaseSchema.tableCourses,
+      {'archived_at': null, 'updated_at': now},
       where: 'id = ?',
       whereArgs: [int.tryParse(id) ?? id],
     );
@@ -490,7 +648,8 @@ class InMemoryCourseRepository implements CourseRepository {
   final List<CourseItem> _courses = [];
 
   @override
-  List<CourseItem> getActiveCourses() => List.unmodifiable(_courses);
+  List<CourseItem> getActiveCourses() =>
+      List.unmodifiable(_courses.where((c) => !c.isArchived));
 
   @override
   CourseItem? getCourseById(String id) {
@@ -498,6 +657,18 @@ class InMemoryCourseRepository implements CourseRepository {
       if (c.id == id || c.code == id) return c;
     }
     return null;
+  }
+
+  @override
+  Future<List<CourseItem>> getCoursesBySemester(
+    int termId, {
+    bool includeArchived = false,
+  }) async {
+    return _courses
+        .where(
+          (c) => c.termId == termId && (includeArchived ? true : !c.isArchived),
+        )
+        .toList();
   }
 
   @override
@@ -510,7 +681,54 @@ class InMemoryCourseRepository implements CourseRepository {
     required String name,
     required int credits,
     required String lecturer,
-  }) async => 1;
+  }) async {
+    if (code.trim().isEmpty) {
+      throw AppFailure(
+        'Kode mata kuliah tidak boleh kosong.',
+        code: 'INVALID_COURSE_CODE',
+      );
+    }
+    if (name.trim().isEmpty) {
+      throw AppFailure(
+        'Nama mata kuliah tidak boleh kosong.',
+        code: 'INVALID_COURSE_NAME',
+      );
+    }
+    if (credits <= 0) {
+      throw AppFailure(
+        'SKS harus berupa bilangan bulat positif.',
+        code: 'INVALID_CREDITS',
+      );
+    }
+
+    final duplicate = _courses.any(
+      (c) =>
+          c.termId == termId &&
+          c.code.toLowerCase() == code.trim().toLowerCase(),
+    );
+    if (duplicate) {
+      throw AppFailure(
+        'Kode mata kuliah "$code" sudah terdaftar pada semester ini.',
+        code: 'DUPLICATE_COURSE_CODE',
+      );
+    }
+
+    final newId = (_courses.length + 1).toString();
+    _courses.add(
+      CourseItem(
+        id: newId,
+        code: code.trim(),
+        name: name.trim(),
+        sks: credits,
+        lecturer: lecturer.trim(),
+        room: 'Ruang Kelas',
+        scheduleLabel: 'Jadwal belum ditentukan',
+        assessmentComponents: const [],
+        termId: termId,
+      ),
+    );
+    return int.parse(newId);
+  }
 
   @override
   Future<void> updateCourse({
@@ -519,7 +737,39 @@ class InMemoryCourseRepository implements CourseRepository {
     required String name,
     required int credits,
     required String lecturer,
-  }) async {}
+    int? termId,
+  }) async {
+    final index = _courses.indexWhere((c) => c.id == id);
+    if (index == -1) {
+      throw AppFailure(
+        'Mata kuliah tidak ditemukan.',
+        code: 'COURSE_NOT_FOUND',
+      );
+    }
+    final current = _courses[index];
+    final targetTerm = termId ?? current.termId;
+
+    final duplicate = _courses.any(
+      (c) =>
+          c.id != id &&
+          c.termId == targetTerm &&
+          c.code.toLowerCase() == code.trim().toLowerCase(),
+    );
+    if (duplicate) {
+      throw AppFailure(
+        'Kode mata kuliah "$code" sudah terdaftar pada semester ini.',
+        code: 'DUPLICATE_COURSE_CODE',
+      );
+    }
+
+    _courses[index] = current.copyWith(
+      code: code.trim(),
+      name: name.trim(),
+      sks: credits,
+      lecturer: lecturer.trim(),
+      termId: targetTerm,
+    );
+  }
 
   @override
   Future<CourseDependentStats> getDependentStats(String id) async =>
@@ -533,7 +783,18 @@ class InMemoryCourseRepository implements CourseRepository {
 
   @override
   Future<void> archiveCourse(String id) async {
-    _courses.removeWhere((c) => c.id == id);
+    final index = _courses.indexWhere((c) => c.id == id);
+    if (index != -1) {
+      _courses[index] = _courses[index].copyWith(isArchived: true);
+    }
+  }
+
+  @override
+  Future<void> unarchiveCourse(String id) async {
+    final index = _courses.indexWhere((c) => c.id == id);
+    if (index != -1) {
+      _courses[index] = _courses[index].copyWith(isArchived: false);
+    }
   }
 
   @override

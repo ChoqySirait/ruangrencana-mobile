@@ -14,7 +14,7 @@ import '../view_models/academic_view_model.dart';
 
 /// Halaman Akademik: menampilkan semester aktif, ringkasan IPS & IPK,
 /// daftar nilai sementara/akhir per mata kuliah, progres SKS & riwayat IPS,
-/// serta pintu masuk menuju Simulasi Nilai.
+/// serta pintu masuk menuju Simulasi Nilai dan Manajemen Semester.
 class AcademicView extends StatelessWidget {
   const AcademicView({super.key});
 
@@ -26,17 +26,38 @@ class AcademicView extends StatelessWidget {
         overview.completedSksBeforeActive + overview.activeSks;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Performa Akademik')),
+      appBar: AppBar(
+        title: const Text('Performa Akademik'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.calendar_month_outlined),
+            tooltip: 'Kelola Semester',
+            onPressed: () => context.pushNamed(AppRoutes.semesterList),
+          ),
+          IconButton(
+            icon: const Icon(Icons.list_alt_rounded),
+            tooltip: 'Daftar Mata Kuliah',
+            onPressed: () => context.pushNamed(AppRoutes.courses),
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.pageHorizontal,
           vertical: AppSpacing.xs,
         ),
         children: [
-          InfoBadge(
-            label: overview.activeSemesterLabel,
-            tone: BadgeTone.primary,
-            icon: Icons.calendar_today_outlined,
+          Align(
+            alignment: Alignment.centerLeft,
+            child: InkWell(
+              onTap: () => context.pushNamed(AppRoutes.semesterList),
+              borderRadius: BorderRadius.circular(AppSpacing.radiusPill),
+              child: InfoBadge(
+                label: overview.activeSemesterLabel,
+                tone: BadgeTone.primary,
+                icon: Icons.calendar_today_outlined,
+              ),
+            ),
           ),
           const SizedBox(height: AppSpacing.sm),
 
@@ -173,42 +194,51 @@ class AcademicView extends StatelessWidget {
                     style: AppTextStyles.labelLarge,
                   ),
                   const SizedBox(height: AppSpacing.xs),
-                  Row(
-                    children: overview.historicalSemesters.map((record) {
-                      return Expanded(
-                        child: Container(
-                          margin: const EdgeInsets.only(right: AppSpacing.xs),
-                          padding: const EdgeInsets.all(AppSpacing.sm),
-                          decoration: BoxDecoration(
-                            color: AppColors.surfaceSubtle,
-                            borderRadius: BorderRadius.circular(
-                              AppSpacing.radiusMd,
+                  if (overview.historicalSemesters.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: AppSpacing.xs),
+                      child: Text(
+                        'Belum ada riwayat semester lampau.',
+                        style: AppTextStyles.bodySmall,
+                      ),
+                    )
+                  else
+                    Row(
+                      children: overview.historicalSemesters.map((record) {
+                        return Expanded(
+                          child: Container(
+                            margin: const EdgeInsets.only(right: AppSpacing.xs),
+                            padding: const EdgeInsets.all(AppSpacing.sm),
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceSubtle,
+                              borderRadius: BorderRadius.circular(
+                                AppSpacing.radiusMd,
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  record.semesterLabel,
+                                  style: AppTextStyles.labelSmall,
+                                ),
+                                const SizedBox(height: AppSpacing.xxs),
+                                Text(
+                                  record.ips.toStringAsFixed(2),
+                                  style: AppTextStyles.titleMedium.copyWith(
+                                    color: AppColors.primaryNavy,
+                                  ),
+                                ),
+                                Text(
+                                  '${record.sks} SKS',
+                                  style: AppTextStyles.bodySmall,
+                                ),
+                              ],
                             ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                record.semesterLabel,
-                                style: AppTextStyles.labelSmall,
-                              ),
-                              const SizedBox(height: AppSpacing.xxs),
-                              Text(
-                                record.ips.toStringAsFixed(2),
-                                style: AppTextStyles.titleMedium.copyWith(
-                                  color: AppColors.primaryNavy,
-                                ),
-                              ),
-                              Text(
-                                '${record.sks} SKS',
-                                style: AppTextStyles.bodySmall,
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
+                        );
+                      }).toList(),
+                    ),
                 ],
               ),
             ),
@@ -217,25 +247,42 @@ class AcademicView extends StatelessWidget {
           const SizedBox(height: AppSpacing.lg),
 
           // Ringkasan Nilai per Mata Kuliah
-          const SectionHeader(title: 'Ringkasan Nilai Mata Kuliah'),
+          SectionHeader(
+            title: 'Ringkasan Nilai Mata Kuliah',
+            actionLabel: 'Kelola',
+            onActionTap: () => context.pushNamed(AppRoutes.courses),
+          ),
           const SizedBox(height: AppSpacing.xxs),
           const Text(
             'Nilai sementara dihitung hanya dari bobot komponen yang sudah dinilai.',
             style: AppTextStyles.bodySmall,
           ),
           const SizedBox(height: AppSpacing.sm),
-          ...overview.courseGrades.map(
-            (item) => Padding(
-              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-              child: _CourseGradeCard(
-                summary: item,
-                onTap: () => context.pushNamed(
-                  AppRoutes.courseDetail,
-                  pathParameters: {'courseId': item.course.id},
+          if (overview.courseGrades.isEmpty)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Text(
+                  'Belum ada mata kuliah aktif pada semester ini.',
+                  style: AppTextStyles.bodyMedium.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+            )
+          else
+            ...overview.courseGrades.map(
+              (item) => Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                child: _CourseGradeCard(
+                  summary: item,
+                  onTap: () => context.pushNamed(
+                    AppRoutes.courseDetail,
+                    pathParameters: {'courseId': item.course.id},
+                  ),
                 ),
               ),
             ),
-          ),
           const SizedBox(height: AppSpacing.md),
         ],
       ),
