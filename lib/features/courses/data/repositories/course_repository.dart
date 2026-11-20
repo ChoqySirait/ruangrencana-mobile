@@ -388,6 +388,14 @@ class SqliteCourseRepository implements CourseRepository {
     int sortOrder = 0,
     double? initialScore,
   }) async {
+    if (initialScore != null &&
+        !AcademicCalculator.isValidScore(initialScore)) {
+      throw AppFailure(
+        'Skor nilai awal harus berada dalam rentang valid 0.0 sampai 100.0.',
+        code: 'INVALID_SCORE',
+      );
+    }
+
     final db = await appDatabase.database;
     final now = DateTime.now().toUtc().toIso8601String();
     final cId = int.parse(courseId);
@@ -406,7 +414,7 @@ class SqliteCourseRepository implements CourseRepository {
       if (initialScore != null) {
         await txn.insert(DatabaseSchema.tableAssessmentScores, {
           'assessment_component_id': id,
-          'score': initialScore,
+          'score': AcademicCalculator.normalizeScore(initialScore),
           'graded_at': now,
           'notes': '',
         });
@@ -425,8 +433,16 @@ class SqliteCourseRepository implements CourseRepository {
     required double score,
     String notes = '',
   }) async {
+    if (!AcademicCalculator.isValidScore(score)) {
+      throw AppFailure(
+        'Skor nilai harus berada dalam rentang valid 0.0 sampai 100.0.',
+        code: 'INVALID_SCORE',
+      );
+    }
+
     final db = await appDatabase.database;
     final now = DateTime.now().toUtc().toIso8601String();
+    final normalizedScore = AcademicCalculator.normalizeScore(score);
 
     await db.transaction((txn) async {
       final existing = await txn.query(
@@ -439,14 +455,14 @@ class SqliteCourseRepository implements CourseRepository {
       if (existing.isNotEmpty) {
         await txn.update(
           DatabaseSchema.tableAssessmentScores,
-          {'score': score, 'graded_at': now, 'notes': notes},
+          {'score': normalizedScore, 'graded_at': now, 'notes': notes},
           where: 'id = ?',
           whereArgs: [existing.first['id']],
         );
       } else {
         await txn.insert(DatabaseSchema.tableAssessmentScores, {
           'assessment_component_id': componentId,
-          'score': score,
+          'score': normalizedScore,
           'graded_at': now,
           'notes': notes,
         });
@@ -533,14 +549,30 @@ class InMemoryCourseRepository implements CourseRepository {
     bool isRequired = true,
     int sortOrder = 0,
     double? initialScore,
-  }) async => 1;
+  }) async {
+    if (initialScore != null &&
+        !AcademicCalculator.isValidScore(initialScore)) {
+      throw AppFailure(
+        'Skor nilai awal harus berada dalam rentang valid 0.0 sampai 100.0.',
+        code: 'INVALID_SCORE',
+      );
+    }
+    return 1;
+  }
 
   @override
   Future<void> recordAssessmentScore({
     required int componentId,
     required double score,
     String notes = '',
-  }) async {}
+  }) async {
+    if (!AcademicCalculator.isValidScore(score)) {
+      throw AppFailure(
+        'Skor nilai harus berada dalam rentang valid 0.0 sampai 100.0.',
+        code: 'INVALID_SCORE',
+      );
+    }
+  }
 
   @override
   Future<void> deleteAssessmentComponent(int componentId) async {}

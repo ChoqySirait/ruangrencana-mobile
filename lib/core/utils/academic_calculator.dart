@@ -112,8 +112,16 @@ abstract final class AcademicCalculator {
     for (final component in components) {
       totalConfiguredWeight += component.weightPercent;
       if (component.score != null) {
-        enteredWeight += component.weightPercent;
-        weightedScoreSum += component.score! * component.weightPercent;
+        if (isValidScore(component.score)) {
+          final normalized = normalizeScore(component.score!);
+          enteredWeight += component.weightPercent;
+          weightedScoreSum += normalized * component.weightPercent;
+        } else {
+          // Komponen dengan skor di luar rentang valid tidak dianggap memiliki nilai valid
+          if (component.isMandatory) {
+            allMandatoryScored = false;
+          }
+        }
       } else if (component.isMandatory) {
         allMandatoryScored = false;
       }
@@ -155,22 +163,60 @@ abstract final class AcademicCalculator {
     return totalQualityPoints / totalSks;
   }
 
+  /// Memeriksa apakah nilai skor berada dalam rentang valid akademik (0.0 s/d 100.0).
+  ///
+  /// Menolak nilai null, NaN, tak terhingga (infinite), negatif (< 0.0), dan di atas 100.0.
+  static bool isValidScore(double? score) {
+    if (score == null) return false;
+    if (score.isNaN || score.isInfinite) return false;
+    return score >= 0.0 && score <= 100.0;
+  }
+
+  /// Kebijakan Pembulatan Desimal Skor Akademik:
+  /// Skor dinormalisasi menggunakan pembulatan dua angka di belakang koma dengan
+  /// metode standard half-up: `(score * 100).round() / 100.0`.
+  ///
+  /// Nilai batas tepat 0.0 dan 100.0 dipertahankan secara utuh.
+  /// Contoh:
+  /// - `84.995` dibulatkan menjadi `85.00` (memenuhi batas bawah rentang nilai A).
+  /// - `84.994` dibulatkan menjadi `84.99` (tetap berada pada rentang nilai A-).
+  /// - `100.0` tetap `100.0`.
+  /// - `0.0` tetap `0.0`.
+  ///
+  /// Melempar [ArgumentError] jika nilai [score] tidak valid (di luar rentang 0.0 - 100.0).
+  static double normalizeScore(double score) {
+    if (!isValidScore(score)) {
+      throw ArgumentError.value(
+        score,
+        'score',
+        'Skor nilai harus berada dalam rentang valid 0.0 sampai 100.0.',
+      );
+    }
+    return (score * 100).round() / 100.0;
+  }
+
   /// Mencari aturan huruf & bobot mutu yang cocok dari skala yang dikonfigurasi.
   ///
-  /// Menangani nilai ambang secara presisi, pembulatan desimal, dan nilai batas 100.0.
+  /// Aturan Validasi Skor:
+  /// 1. Menolak nilai di bawah 0.0 dan di atas 100.0 secara mutlak dengan mengembalikan `null`
+  ///    (TIDAK melakukan silent clamping yang dapat mengubah input tidak valid menjadi valid).
+  /// 2. Mendukung secara presisi nilai batas tepat 0.0 dan 100.0.
+  /// 3. Menerapkan kebijakan pembulatan 2 desimal standar kampus (round half-up)
+  ///    sehingga pecahan mikro seperti `84.995` secara deterministik dipetakan ke ambang terdekat.
+  /// 4. Skala yang tidak lengkap atau tidak mencakup skor akan mengembalikan `null`,
+  ///    mencegah pembuatan nilai huruf palsu (*false letter grade*).
   static GradeScaleRule? resolveGradeRule(
     double score,
     List<GradeScaleRule> rules,
   ) {
     if (rules.isEmpty) return null;
+    if (!isValidScore(score)) return null;
 
-    // Normalisasi dan pembulatan dua desimal standar kampus
-    final normalizedScore = (score * 100).round() / 100.0;
-    final clampedScore = normalizedScore.clamp(0.0, 100.0);
+    final normalizedScore = normalizeScore(score);
 
     for (final rule in rules) {
-      if (clampedScore >= (rule.minScore - 0.0001) &&
-          clampedScore <= (rule.maxScore + 0.0001)) {
+      if (normalizedScore >= (rule.minScore - 0.0001) &&
+          normalizedScore <= (rule.maxScore + 0.0001)) {
         return rule;
       }
     }
@@ -180,7 +226,8 @@ abstract final class AcademicCalculator {
       ..sort((a, b) => b.minScore.compareTo(a.minScore));
 
     for (final rule in sorted) {
-      if (clampedScore >= rule.minScore - 0.005) {
+      if (normalizedScore >= rule.minScore - 0.005 &&
+          normalizedScore <= rule.maxScore + 0.005) {
         return rule;
       }
     }

@@ -157,7 +157,7 @@ void main() {
       expect(gapRes.hasCoverageGaps, isTrue);
     });
 
-    test('penanganan batas ekstrem (100.0, 0.0, pembulatan, dan skor di luar skala)', () {
+    test('penolakan skor di luar rentang (skor negatif dan > 100) serta penanganan batas presisi', () {
       const standardScale = [
         GradeScaleRule(
           minScore: 85.0,
@@ -185,7 +185,32 @@ void main() {
         ),
       ];
 
-      // Tepat 100.0 didukung penuh
+      // 1. Validasi isValidScore
+      expect(AcademicCalculator.isValidScore(0.0), isTrue);
+      expect(AcademicCalculator.isValidScore(100.0), isTrue);
+      expect(AcademicCalculator.isValidScore(84.995), isTrue);
+      expect(AcademicCalculator.isValidScore(-0.01), isFalse);
+      expect(AcademicCalculator.isValidScore(-5.0), isFalse);
+      expect(AcademicCalculator.isValidScore(100.01), isFalse);
+      expect(AcademicCalculator.isValidScore(105.0), isFalse);
+      expect(AcademicCalculator.isValidScore(double.nan), isFalse);
+      expect(AcademicCalculator.isValidScore(double.infinity), isFalse);
+
+      // 2. Kebijakan pembulatan normalizeScore (round half-up)
+      expect(AcademicCalculator.normalizeScore(100.0), 100.0);
+      expect(AcademicCalculator.normalizeScore(0.0), 0.0);
+      expect(AcademicCalculator.normalizeScore(84.995), 85.00);
+      expect(AcademicCalculator.normalizeScore(84.994), 84.99);
+      expect(
+        () => AcademicCalculator.normalizeScore(-1.0),
+        throwsArgumentError,
+      );
+      expect(
+        () => AcademicCalculator.normalizeScore(101.0),
+        throwsArgumentError,
+      );
+
+      // 3. Tepat batas 100.0 dan 0.0 didukung penuh
       expect(
         AcademicCalculator.resolveGradeRule(100.0, standardScale)?.letter,
         'A',
@@ -194,14 +219,16 @@ void main() {
         AcademicCalculator.resolveGradeRule(100.0, standardScale)?.gradePoint,
         4.0,
       );
-
-      // Tepat 0.0 didukung penuh
       expect(
         AcademicCalculator.resolveGradeRule(0.0, standardScale)?.letter,
         'E',
       );
+      expect(
+        AcademicCalculator.resolveGradeRule(0.0, standardScale)?.gradePoint,
+        0.0,
+      );
 
-      // Batas ambang 85.0 dan 84.99
+      // 4. Batas ambang 85.0 dan 84.99
       expect(
         AcademicCalculator.resolveGradeRule(85.0, standardScale)?.letter,
         'A',
@@ -211,23 +238,26 @@ void main() {
         'A-',
       );
 
-      // Skor pada celah desimal mikro (84.995 dibulatkan ke 85.00)
+      // 5. Verifikasi deterministik 84.995 vs 84.994
       expect(
         AcademicCalculator.resolveGradeRule(84.995, standardScale)?.letter,
         'A',
       );
-
-      // Skor di luar batas (> 100 atau < 0) di-clamp
       expect(
-        AcademicCalculator.resolveGradeRule(105.0, standardScale)?.letter,
-        'A',
-      );
-      expect(
-        AcademicCalculator.resolveGradeRule(-5.0, standardScale)?.letter,
-        'E',
+        AcademicCalculator.resolveGradeRule(84.994, standardScale)?.letter,
+        'A-',
       );
 
-      // Skala tidak lengkap dan skor jatuh di luar rentang
+      // 6. Penolakan mutlak skor di luar batas (TIDAK ADA silent clamping ke A atau E)
+      expect(AcademicCalculator.resolveGradeRule(105.0, standardScale), isNull);
+      expect(
+        AcademicCalculator.resolveGradeRule(100.01, standardScale),
+        isNull,
+      );
+      expect(AcademicCalculator.resolveGradeRule(-0.01, standardScale), isNull);
+      expect(AcademicCalculator.resolveGradeRule(-5.0, standardScale), isNull);
+
+      // 7. Skala tidak lengkap dan skor jatuh di luar rentang
       const partialScale = [
         GradeScaleRule(
           minScore: 70.0,
@@ -237,6 +267,7 @@ void main() {
         ),
       ];
       expect(AcademicCalculator.resolveGradeRule(50.0, partialScale), isNull);
+      expect(AcademicCalculator.resolveGradeRule(90.0, partialScale), isNull);
     });
   });
 }

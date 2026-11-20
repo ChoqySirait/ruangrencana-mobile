@@ -440,5 +440,83 @@ void main() {
 
       await appDb2.close();
     });
+
+    test(
+      'Penolakan Skor Penilaian di Luar Rentang 0.0 - 100.0 pada Repositori',
+      () async {
+        final appDb = AppDatabase(databaseFactory: databaseFactoryFfi);
+        final db = await appDb.open(customPath: dbFilePath);
+        await DatabaseSeeder.seedIfNeeded(db);
+
+        final courseRepo = SqliteCourseRepository(appDatabase: appDb);
+        await courseRepo.load();
+
+        final course = courseRepo.getActiveCourses().first;
+
+        // 1. Menolak initialScore < 0.0 atau > 100.0 pada penambahan komponen
+        expect(
+          () => courseRepo.addAssessmentComponent(
+            courseId: course.id,
+            name: 'Komponen Tidak Valid',
+            weightPercent: 20.0,
+            initialScore: -5.0,
+          ),
+          throwsA(
+            isA<AppFailure>().having((e) => e.code, 'code', 'INVALID_SCORE'),
+          ),
+        );
+
+        expect(
+          () => courseRepo.addAssessmentComponent(
+            courseId: course.id,
+            name: 'Komponen Skor Berlebih',
+            weightPercent: 20.0,
+            initialScore: 105.0,
+          ),
+          throwsA(
+            isA<AppFailure>().having((e) => e.code, 'code', 'INVALID_SCORE'),
+          ),
+        );
+
+        // 2. Sukses menambahkan komponen dengan nilai valid (menerapkan normalisasi 84.995 -> 85.00)
+        final compId = await courseRepo.addAssessmentComponent(
+          courseId: course.id,
+          name: 'Kuis Validasi',
+          weightPercent: 10.0,
+          initialScore: 84.995,
+        );
+        expect(compId, greaterThan(0));
+
+        // 3. Menolak update skor < 0.0 atau > 100.0
+        expect(
+          () => courseRepo.recordAssessmentScore(
+            componentId: compId,
+            score: -1.0,
+          ),
+          throwsA(
+            isA<AppFailure>().having((e) => e.code, 'code', 'INVALID_SCORE'),
+          ),
+        );
+
+        expect(
+          () => courseRepo.recordAssessmentScore(
+            componentId: compId,
+            score: 100.5,
+          ),
+          throwsA(
+            isA<AppFailure>().having((e) => e.code, 'code', 'INVALID_SCORE'),
+          ),
+        );
+
+        // 4. Menerima nilai batas tepat 0.0 dan 100.0 secara presisi
+        await courseRepo.recordAssessmentScore(componentId: compId, score: 0.0);
+        await courseRepo.recordAssessmentScore(
+          componentId: compId,
+          score: 100.0,
+        );
+
+        await appDb.close();
+      },
+    );
   });
 }

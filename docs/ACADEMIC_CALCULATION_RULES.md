@@ -63,10 +63,15 @@ Sistem harus mendukung konfigurasi skala nilai milik pengguna yang mencakup:
   - Setelah diurutkan naik berdasarkan `minScore`, tidak boleh ada aturan ke-$k$ yang memiliki `minScore < previous.maxScore` (toleransi numerik `0.001`).
   - Tidak boleh ada celah cakupan nilai (*coverage gaps*): batas bawah skala harus mencakup `0.0`, batas atas skala harus mencakup `100.0`, dan jarak antar-rentang tidak boleh meninggalkan celah nilai tak terdefinisi.
   - Skala yang tidak lengkap atau tidak valid dilarang secara diam-diam menghasilkan nilai huruf palsu (*silent grade fallback*); sistem mengembalikan `null` / status tidak terdefinisi (`'-'`).
-- **Perilaku Batas Ambang (*Boundary Behavior*)**:
-  - Setiap rentang bersifat inklusif (`score >= minScore && score <= maxScore`).
-  - Untuk nilai sempurna `100.0`, aturan skala teratas menggunakan `minScore` (mis. `85.0`) hingga `100.0`.
-  - Rentang tepat di bawahnya menggunakan batas atas desimal (mis. `84.99`). Skor dinormalisasi dengan pembulatan dua desimal standar kampus (`(score * 100).round() / 100.0`) dan di-clamp pada interval `0.0 - 100.0`, sehingga skor mikro (seperti `84.995`) secara deterministik dipetakan ke ambang terdekat tanpa jatuh ke celah kosong.
+- **Perilaku Batas Ambang (*Boundary Behavior*) & Kebijakan Pembulatan**:
+  - **Penolakan Skor di Luar Rentang (*No Silent Clamping*)**: Sistem menolak secara tegas skor `< 0.0` atau `> 100.0` (mengembalikan `null` atau melempar kegagalan validasi `INVALID_SCORE`). Sistem dilarang melakukan pemotongan diam-diam (*silent clamping*) yang dapat mengubah input pengguna yang keliru menjadi nilai valid.
+  - **Dukungan Batas Ekstrem**: Nilai batas tepat `0.0` dan `100.0` didukung penuh secara presisi.
+  - **Kebijakan Pembulatan Dua Desimal (*Round Half-Up*)**: Skor dinormalisasi menggunakan pembulatan standar dua desimal:
+    $$\text{score}_{\text{normalized}} = \frac{\text{round}(\text{score} \times 100)}{100.0}$$
+  - **Penanganan Pecahan Mikro Ambang**:
+    - Skor seperti `84.995` dibulatkan secara deterministik menjadi `85.00` (memenuhi batas bawah rentang nilai A `85.00 - 100.00`).
+    - Skor seperti `84.994` dibulatkan menjadi `84.99` (tetap berada pada rentang nilai A- `80.00 - 84.99`).
+  - **Pencegahan Nilai Palsu**: Skala yang tidak mencakup skor atau skala tidak lengkap tidak akan menghasilkan nilai huruf palsu; sistem mengembalikan status tidak terdefinisi (`'-'`).
 - **Kebijakan dapat diubah**: pengguna dapat membuat, mengubah, atau memilih profil skala sesuai aturan kampusnya.
 
 > Catatan tahap fondasi: Skala 4.00 yang muncul pada data demo saat ini hanyalah **contoh konfigurasi awal**, bukan standar baku yang dipaksakan.

@@ -58,9 +58,10 @@ class GradeSimulatorViewModel extends ChangeNotifier {
   }
 
   void updateHypotheticalScore(String courseId, double score) {
-    final clamped = score.clamp(0.0, 100.0);
-    if (_hypotheticalScores[courseId] == clamped) return;
-    _hypotheticalScores[courseId] = clamped;
+    if (!AcademicCalculator.isValidScore(score)) return;
+    final normalized = AcademicCalculator.normalizeScore(score);
+    if (_hypotheticalScores[courseId] == normalized) return;
+    _hypotheticalScores[courseId] = normalized;
     notifyListeners();
   }
 
