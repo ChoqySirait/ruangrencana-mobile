@@ -8,14 +8,18 @@
 
 ## Status Proyek
 
-Saat ini proyek telah menyelesaikan **Tahap 1 — Implementasi Basis Data SQLite & Persistensi Repositori**:
+Saat ini proyek telah menyelesaikan **Tahap 1 — Implementasi Basis Data SQLite & Persistensi Repositori** serta **Tahap 1.1 — Audit Basis Data & Penyempurnaan Integritas Data Akademik**:
 
 - Fondasi proyek Flutter (Android-first) dengan arsitektur **MVVM** dan struktur *feature-first*.
 - Sistem desain **Material Design 3** (Mode Terang) dengan token warna, tipografi, dan spasi 8-poin terpusat.
 - Navigasi lima halaman utama persisten menggunakan **GoRouter** (`StatefulShellRoute`) beserta rute sekunder (Detail Mata Kuliah, Tambah/Ubah/Hapus Tugas, Simulasi Nilai).
 - Lapisan basis data relasional **SQLite** (`sqflite`) dengan 10 tabel ternormalisasi, penegakan *foreign key*, transaksi atomik, 13 indeks query, serta manajer migrasi skema (`DatabaseMigrationManager`).
 - Repositori terintegrasi penuh ke SQLite (`SqliteProfileRepository`, `SqliteCourseRepository`, `SqliteScheduleRepository`, `SqliteTaskRepository`, `SqliteAcademicRepository`) dengan strategi *cache-backed / offline-first*.
-- Strategi *seeding* awal *idempotent* (`DatabaseSeeder`) dengan data demonstrasi fiktif yang tidak menimpa data pengguna.
+- Sumber data riwayat akademik relasional murni: `academic_terms` dan `courses` menjadi otoritas tunggal riwayat nilai tanpa duplikasi di `app_preferences`.
+- Strategi *seeding* awal *idempotent* (`DatabaseSeeder`) dengan identitas demonstrasi fiktif yang konsisten (`Mahasiswa Demo`, `DEMO-001`).
+- Perlindungan terhadap penghapusan riwayat akademik (`getDependentStats`, blokir penghapusan mata kuliah berpenilaian tanpa konfirmasi paksa, dan rekomendasi pengarsipan).
+- Validasi ketat skala penilaian (`validateGradingScale`: anti-overlap, deteksi celah cakupan nilai, dukungan nilai 100.0, dan pembulatan ambang).
+- Konsistensi zona waktu (penyimpanan ISO 8601 UTC di database dan konversi waktu lokal di tampilan).
 - Perhitungan akademik murni terpisah di `AcademicCalculator` (provisional grade, kesiapan final grade, IPS/IPK dinamis, isolasi simulasi nilai).
 - Pengujian komprehensif mencakup *unit test* kalkulator, *database schema test*, *repository persistence lifecycle test*, dan *widget test* pada viewport `393 × 852 px`.
 

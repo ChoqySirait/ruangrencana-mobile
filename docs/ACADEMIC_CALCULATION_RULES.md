@@ -58,13 +58,15 @@ Sistem harus mendukung konfigurasi skala nilai milik pengguna yang mencakup:
 - **Rentang skor** (`minScore` sampai `maxScore`, inklusif).
 - **Nilai huruf** (`letter`).
 - **Bobot mutu** (`gradePoint`).
-- **Validasi anti-tumpang tindih (*non-overlapping*)**:
+- **Validasi anti-tumpang tindih (*non-overlapping*) & Kelengkapan Skala**:
   - Setiap aturan harus memenuhi `minScore <= maxScore`.
-  - Setelah diurutkan naik berdasarkan `minScore`, tidak boleh ada aturan ke-$k$ yang memiliki `minScore <= previous.maxScore`.
+  - Setelah diurutkan naik berdasarkan `minScore`, tidak boleh ada aturan ke-$k$ yang memiliki `minScore < previous.maxScore` (toleransi numerik `0.001`).
+  - Tidak boleh ada celah cakupan nilai (*coverage gaps*): batas bawah skala harus mencakup `0.0`, batas atas skala harus mencakup `100.0`, dan jarak antar-rentang tidak boleh meninggalkan celah nilai tak terdefinisi.
+  - Skala yang tidak lengkap atau tidak valid dilarang secara diam-diam menghasilkan nilai huruf palsu (*silent grade fallback*); sistem mengembalikan `null` / status tidak terdefinisi (`'-'`).
 - **Perilaku Batas Ambang (*Boundary Behavior*)**:
   - Setiap rentang bersifat inklusif (`score >= minScore && score <= maxScore`).
   - Untuk nilai sempurna `100.0`, aturan skala teratas menggunakan `minScore` (mis. `85.0`) hingga `100.0`.
-  - Rentang tepat di bawahnya menggunakan batas atas desimal (mis. `84.99`), sehingga tidak ada skor yang jatuh di antara dua rentang atau memiliki tafsir ganda.
+  - Rentang tepat di bawahnya menggunakan batas atas desimal (mis. `84.99`). Skor dinormalisasi dengan pembulatan dua desimal standar kampus (`(score * 100).round() / 100.0`) dan di-clamp pada interval `0.0 - 100.0`, sehingga skor mikro (seperti `84.995`) secara deterministik dipetakan ke ambang terdekat tanpa jatuh ke celah kosong.
 - **Kebijakan dapat diubah**: pengguna dapat membuat, mengubah, atau memilih profil skala sesuai aturan kampusnya.
 
 > Catatan tahap fondasi: Skala 4.00 yang muncul pada data demo saat ini hanyalah **contoh konfigurasi awal**, bukan standar baku yang dipaksakan.
@@ -97,3 +99,26 @@ $$\text{IPK} = \frac{\sum_{\text{semester}} \sum (\text{SKS} \times \text{GradeP
 - Seluruh nilai yang diubah di layar Simulasi Nilai bersifat **hipotetis**.
 - Simulasi **tidak pernah** menulis ulang, mengubah, atau menimpa data nilai asli di repository maupun database lokal.
 - Kalkulasi proyeksi IPS dan proyeksi IPK selalu dijalankan pada objek/state terisolasi (`GradeSimulatorViewModel`) dengan memanfaatkan fungsi murni `AcademicCalculator`.
+
+---
+
+## G. Otoritas Riwayat Semester & Perlindungan Rekaman Akademik
+
+1. **Sumber Kebenaran Riwayat Akademik Tunggal**:
+   - Tabel `academic_terms` adalah pemegang otoritas tunggal periode semester.
+   - Tabel `courses` mereferensikan `academic_terms(id)` terkait.
+   - Hasil nilai dan IPS riwayat semester lampau selalu **dihitung secara relasional dinamis** dari mata kuliah, komponen penilaian, dan skor yang terhubung.
+   - Tabel `app_preferences` murni digunakan untuk konfigurasi preferensi pengguna (seperti notifikasi dan target SKS kelulusan); tidak ada data riwayat akademik yang diduplikasi dalam format JSON di preferensi.
+
+2. **Perlindungan Terhadap Penghapusan Mata Kuliah**:
+   - Mata kuliah yang telah memiliki riwayat penilaian (`assessment_scores`) atau berada pada semester yang sudah ditutup tidak boleh dihapus secara gegabah.
+   - **Pengarsipan (*archiving*)** merupakan operasi yang direkomendasikan untuk mempertahankan integritas riwayat transkrip.
+   - Penghapusan permanen memerlukan konfirmasi eksplisit (`force: true`) dan seluruh entitas dependen dihapus secara bersih dalam transaksi atomik untuk mencegah *orphaned assessment scores*.
+
+---
+
+## H. Strategi Konsistensi Waktu dan Zona Waktu (*Timezone Strategy*)
+
+- **Penyimpanan (*Storage*)**: Seluruh tanggal dan stempel waktu disimpan dalam format ISO 8601 berbasis UTC (`.toUtc().toIso8601String()`) di basis data SQLite.
+- **Penyajian (*Presentation*)**: Seluruh tanggal dikonversi secara eksplisit ke waktu lokal perangkat pengguna (`.toLocal()`) saat dimuat dan diformat oleh `DateFormatter`.
+- **Evaluasi Tenggat Waktu**: Perbandingan status tenggat waktu (`overdue` vs `upcoming`) dilakukan secara mutlak menggunakan representasi waktu UTC terstandardisasi (`dueDate.toUtc().isBefore(reference.toUtc())`), sehingga mencegah kesalahan status tugas akibat perbedaan zona waktu atau pergantian waktu musim.

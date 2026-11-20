@@ -91,3 +91,11 @@ Arsitektur saat ini dirancang agar siap diintegrasikan dengan backend REST API d
    - Kirim *payload* mutasi ke REST API di latar belakang saat jaringan tersedia.
 2. **Tanpa Perubahan pada UI & ViewModel**: ViewModel dan UI tidak memedulikan apakah data berasal dari SQLite lokal, memori, atau REST API jarak jauh karena antarmuka `TaskRepository`, `CourseRepository`, dll. tetap identik.
 3. **Pemisahan Identitas dan Token**: Sesi otentikasi (JWT / OAuth2) nantinya disimpan aman menggunakan `flutter_secure_storage`, sementara profil pengguna dan data akademik tetap di-cache secara relasional di SQLite lokal.
+
+---
+
+## 6. Audit Integritas Data & Perlindungan Rekaman (Tahap 1.1)
+
+1. **Otoritas Relasional Murni**: Tabel `academic_terms` dan `courses` menjadi otoritas tunggal riwayat akademik. `app_preferences` hanya menampung preferensi sistem, bukan data riwayat nilai terduplikasi.
+2. **Perlindungan Terhadap Penghapusan Rekaman Berharga**: `CourseRepository` menyediakan `getDependentStats()` dan mewajibkan konfirmasi eksplisit (`force: true`) jika mata kuliah memiliki riwayat penilaian akademik, dengan rekomendasi utama berupa pengarsipan (`archiveCourse`).
+3. **Penegakan Integritas Waktu UTC**: Konsistensi penulisan stempel waktu UTC di database dan konversi waktu lokal pengguna pada saat penyajian mencegah kesalahan deteksi keterlambatan tugas (*overdue tasks*).

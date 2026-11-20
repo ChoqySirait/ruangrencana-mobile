@@ -82,6 +82,9 @@ void main() {
         ),
       ];
 
+      final validation = AcademicCalculator.validateGradingScale(rules);
+      expect(validation.isValid, isTrue);
+      expect(validation.errors, isEmpty);
       expect(AcademicCalculator.hasOverlappingGradeRanges(rules), isFalse);
       expect(AcademicCalculator.resolveGradeRule(85, rules)?.letter, 'A');
       expect(AcademicCalculator.resolveGradeRule(80, rules)?.letter, 'B+');
@@ -93,10 +96,147 @@ void main() {
         GradeScaleRule(minScore: 70, maxScore: 85, letter: 'B', gradePoint: 3),
       ];
 
+      final validation = AcademicCalculator.validateGradingScale(invalidRules);
+      expect(validation.isValid, isFalse);
+      expect(validation.hasOverlaps, isTrue);
       expect(
         AcademicCalculator.hasOverlappingGradeRanges(invalidRules),
         isTrue,
       );
+    });
+
+    test('mendeteksi rentang terbalik, celah nilai, dan batas ambang tidak lengkap', () {
+      // 1. Skala kosong
+      expect(AcademicCalculator.validateGradingScale([]).isValid, isFalse);
+
+      // 2. Rentang terbalik (min > max)
+      const invertedRules = [
+        GradeScaleRule(
+          minScore: 90,
+          maxScore: 80,
+          letter: 'A',
+          gradePoint: 4.0,
+        ),
+      ];
+      final invertedRes = AcademicCalculator.validateGradingScale(
+        invertedRules,
+      );
+      expect(invertedRes.isValid, isFalse);
+      expect(
+        invertedRes.errors.any((e) => e.contains('melebihi batas maksimum')),
+        isTrue,
+      );
+
+      // 3. Skala tidak mencakup 100.0 atau 0.0
+      const incompleteScale = [
+        GradeScaleRule(
+          minScore: 60,
+          maxScore: 90,
+          letter: 'C',
+          gradePoint: 2.0,
+        ),
+      ];
+      final incompleteRes = AcademicCalculator.validateGradingScale(
+        incompleteScale,
+      );
+      expect(incompleteRes.isValid, isFalse);
+      expect(incompleteRes.hasCoverageGaps, isTrue);
+
+      // 4. Celah nilai antar-rentang (gap)
+      const gapScale = [
+        GradeScaleRule(
+          minScore: 80,
+          maxScore: 100,
+          letter: 'A',
+          gradePoint: 4.0,
+        ),
+        GradeScaleRule(minScore: 0, maxScore: 60, letter: 'D', gradePoint: 1.0),
+      ];
+      final gapRes = AcademicCalculator.validateGradingScale(gapScale);
+      expect(gapRes.isValid, isFalse);
+      expect(gapRes.hasCoverageGaps, isTrue);
+    });
+
+    test('penanganan batas ekstrem (100.0, 0.0, pembulatan, dan skor di luar skala)', () {
+      const standardScale = [
+        GradeScaleRule(
+          minScore: 85.0,
+          maxScore: 100.0,
+          letter: 'A',
+          gradePoint: 4.0,
+        ),
+        GradeScaleRule(
+          minScore: 80.0,
+          maxScore: 84.99,
+          letter: 'A-',
+          gradePoint: 3.7,
+        ),
+        GradeScaleRule(
+          minScore: 70.0,
+          maxScore: 79.99,
+          letter: 'B',
+          gradePoint: 3.0,
+        ),
+        GradeScaleRule(
+          minScore: 0.0,
+          maxScore: 69.99,
+          letter: 'E',
+          gradePoint: 0.0,
+        ),
+      ];
+
+      // Tepat 100.0 didukung penuh
+      expect(
+        AcademicCalculator.resolveGradeRule(100.0, standardScale)?.letter,
+        'A',
+      );
+      expect(
+        AcademicCalculator.resolveGradeRule(100.0, standardScale)?.gradePoint,
+        4.0,
+      );
+
+      // Tepat 0.0 didukung penuh
+      expect(
+        AcademicCalculator.resolveGradeRule(0.0, standardScale)?.letter,
+        'E',
+      );
+
+      // Batas ambang 85.0 dan 84.99
+      expect(
+        AcademicCalculator.resolveGradeRule(85.0, standardScale)?.letter,
+        'A',
+      );
+      expect(
+        AcademicCalculator.resolveGradeRule(84.99, standardScale)?.letter,
+        'A-',
+      );
+
+      // Skor pada celah desimal mikro (84.995 dibulatkan ke 85.00)
+      expect(
+        AcademicCalculator.resolveGradeRule(84.995, standardScale)?.letter,
+        'A',
+      );
+
+      // Skor di luar batas (> 100 atau < 0) di-clamp
+      expect(
+        AcademicCalculator.resolveGradeRule(105.0, standardScale)?.letter,
+        'A',
+      );
+      expect(
+        AcademicCalculator.resolveGradeRule(-5.0, standardScale)?.letter,
+        'E',
+      );
+
+      // Skala tidak lengkap dan skor jatuh di luar rentang
+      const partialScale = [
+        GradeScaleRule(
+          minScore: 70.0,
+          maxScore: 80.0,
+          letter: 'B',
+          gradePoint: 3.0,
+        ),
+      ];
+      expect(AcademicCalculator.resolveGradeRule(50.0, partialScale), isNull);
     });
   });
 }

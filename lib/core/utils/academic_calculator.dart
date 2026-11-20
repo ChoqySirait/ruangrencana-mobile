@@ -66,6 +66,21 @@ class WeightedGradePoint {
   final double gradePoint;
 }
 
+/// Hasil evaluasi validitas konfigurasi skala konversi nilai.
+class GradingScaleValidationResult {
+  const GradingScaleValidationResult({
+    required this.isValid,
+    required this.errors,
+    this.hasCoverageGaps = false,
+    this.hasOverlaps = false,
+  });
+
+  final bool isValid;
+  final List<String> errors;
+  final bool hasCoverageGaps;
+  final bool hasOverlaps;
+}
+
 /// Utilitas murni (pure functions) untuk kalkulasi akademik RuangRencana.
 ///
 /// Seluruh perhitungan akademik dipisahkan dari lapisan UI agar mudah diuji
@@ -141,37 +156,131 @@ abstract final class AcademicCalculator {
   }
 
   /// Mencari aturan huruf & bobot mutu yang cocok dari skala yang dikonfigurasi.
+  ///
+  /// Menangani nilai ambang secara presisi, pembulatan desimal, dan nilai batas 100.0.
   static GradeScaleRule? resolveGradeRule(
     double score,
     List<GradeScaleRule> rules,
   ) {
+    if (rules.isEmpty) return null;
+
+    // Normalisasi dan pembulatan dua desimal standar kampus
+    final normalizedScore = (score * 100).round() / 100.0;
+    final clampedScore = normalizedScore.clamp(0.0, 100.0);
+
     for (final rule in rules) {
-      if (score >= rule.minScore && score <= rule.maxScore) {
+      if (clampedScore >= (rule.minScore - 0.0001) &&
+          clampedScore <= (rule.maxScore + 0.0001)) {
         return rule;
       }
     }
+
+    // Toleransi batas bertetangga (misal antara 84.99 dan 85.0)
+    final sorted = List<GradeScaleRule>.from(rules)
+      ..sort((a, b) => b.minScore.compareTo(a.minScore));
+
+    for (final rule in sorted) {
+      if (clampedScore >= rule.minScore - 0.005) {
+        return rule;
+      }
+    }
+
     return null;
   }
 
-  /// Memvalidasi apakah daftar rentang skala nilai memiliki tumpang tindih
-  /// (overlap) atau rentang tidak valid (`minScore > maxScore`).
-  static bool hasOverlappingGradeRanges(List<GradeScaleRule> rules) {
+  /// Evaluasi komprehensif validitas konfigurasi skala konversi nilai:
+  /// - Batas minimum tidak boleh melebihi batas maksimum.
+  /// - Tidak boleh ada rentang yang saling bertabrakan (overlapping).
+  /// - Harus mencakup batas bawah 0.0 dan batas atas 100.0.
+  /// - Tidak boleh ada celah nilai signifikan antar-rentang.
+  static GradingScaleValidationResult validateGradingScale(
+    List<GradeScaleRule> rules,
+  ) {
+    final errors = <String>[];
+    if (rules.isEmpty) {
+      return const GradingScaleValidationResult(
+        isValid: false,
+        errors: ['Skala penilaian tidak boleh kosong.'],
+        hasCoverageGaps: true,
+      );
+    }
+
+    var hasInverted = false;
     for (final rule in rules) {
       if (rule.minScore > rule.maxScore) {
-        return true;
+        hasInverted = true;
+        errors.add(
+          'Rentang nilai "${rule.letter}" tidak valid: batas minimum (${rule.minScore}) melebihi batas maksimum (${rule.maxScore}).',
+        );
       }
+      if (rule.minScore < 0.0 || rule.maxScore > 100.0) {
+        errors.add(
+          'Rentang skor "${rule.letter}" harus berada dalam batas 0.0 sampai 100.0.',
+        );
+      }
+      if (rule.gradePoint < 0.0) {
+        errors.add('Bobot mutu untuk "${rule.letter}" tidak boleh negatif.');
+      }
+    }
+
+    if (hasInverted) {
+      return GradingScaleValidationResult(
+        isValid: false,
+        errors: errors,
+        hasOverlaps: true,
+      );
     }
 
     final sorted = List<GradeScaleRule>.from(rules)
       ..sort((a, b) => a.minScore.compareTo(b.minScore));
 
+    var hasOverlaps = false;
     for (var i = 1; i < sorted.length; i++) {
-      final previous = sorted[i - 1];
-      final current = sorted[i];
-      if (current.minScore <= previous.maxScore) {
-        return true;
+      final prev = sorted[i - 1];
+      final curr = sorted[i];
+      if (curr.minScore < prev.maxScore - 0.001) {
+        hasOverlaps = true;
+        errors.add(
+          'Rentang "${prev.letter}" (${prev.minScore}-${prev.maxScore}) bertabrakan dengan rentang "${curr.letter}" (${curr.minScore}-${curr.maxScore}).',
+        );
       }
     }
-    return false;
+
+    var hasCoverageGaps = false;
+    final topRule = sorted.last;
+    if (topRule.maxScore < 100.0 - 0.001) {
+      hasCoverageGaps = true;
+      errors.add('Skala penilaian tidak mencakup nilai sempurna 100.0.');
+    }
+
+    final bottomRule = sorted.first;
+    if (bottomRule.minScore > 0.0 + 0.001) {
+      hasCoverageGaps = true;
+      errors.add('Skala penilaian tidak mencakup batas bawah 0.0.');
+    }
+
+    for (var i = 1; i < sorted.length; i++) {
+      final prev = sorted[i - 1];
+      final curr = sorted[i];
+      if (curr.minScore > prev.maxScore + 0.011) {
+        hasCoverageGaps = true;
+        errors.add(
+          'Terdapat celah nilai yang tidak terdefinisi antara batas atas "${prev.letter}" (${prev.maxScore}) dan batas bawah "${curr.letter}" (${curr.minScore}).',
+        );
+      }
+    }
+
+    return GradingScaleValidationResult(
+      isValid: errors.isEmpty,
+      errors: errors,
+      hasCoverageGaps: hasCoverageGaps,
+      hasOverlaps: hasOverlaps,
+    );
+  }
+
+  /// Memvalidasi apakah daftar rentang skala nilai memiliki tumpang tindih
+  /// (overlap) atau rentang tidak valid.
+  static bool hasOverlappingGradeRanges(List<GradeScaleRule> rules) {
+    return !validateGradingScale(rules).isValid;
   }
 }

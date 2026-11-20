@@ -48,23 +48,25 @@ abstract final class DateFormatter {
     return _shortDays[index];
   }
 
-  /// Format ringkas: "18 Nov 2026".
+  /// Format ringkas: "18 Nov 2026" dalam zona waktu lokal pengguna.
   static String shortDate(DateTime date) {
-    final month = _shortMonths[(date.month - 1).clamp(0, 11)];
-    return '${date.day} $month ${date.year}';
+    final local = date.toLocal();
+    final month = _shortMonths[(local.month - 1).clamp(0, 11)];
+    return '${local.day} $month ${local.year}';
   }
 
-  /// Format tanggal dengan waktu: "18 Nov, 23:59".
+  /// Format tanggal dengan waktu: "18 Nov, 23:59" dalam zona waktu lokal pengguna.
   static String shortDateWithTime(DateTime date) {
-    final month = _shortMonths[(date.month - 1).clamp(0, 11)];
-    final hour = date.hour.toString().padLeft(2, '0');
-    final minute = date.minute.toString().padLeft(2, '0');
-    return '${date.day} $month, $hour:$minute';
+    final local = date.toLocal();
+    final month = _shortMonths[(local.month - 1).clamp(0, 11)];
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '${local.day} $month, $hour:$minute';
   }
 
-  /// Mengembalikan label relatif singkat terhadap [reference].
+  /// Mengembalikan label relatif singkat terhadap [reference] dengan konsistensi waktu UTC.
   static String relativeDeadlineLabel(DateTime dueDate, DateTime reference) {
-    final diff = dueDate.difference(reference);
+    final diff = dueDate.toUtc().difference(reference.toUtc());
     if (diff.isNegative) {
       final overdueDays = diff.inDays.abs();
       if (overdueDays == 0) {

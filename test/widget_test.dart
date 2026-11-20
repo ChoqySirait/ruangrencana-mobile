@@ -95,7 +95,7 @@ void main() {
     await pumpAppAtMobileViewport(tester);
 
     // 1. Beranda
-    expect(find.textContaining('Choqy'), findsOneWidget);
+    expect(find.textContaining('Mahasiswa'), findsWidgets);
     expect(find.text('IPS Sementara'), findsOneWidget);
     expect(find.text('IPK Kumulatif'), findsOneWidget);
     expect(find.text('SKS Aktif'), findsOneWidget);
@@ -142,7 +142,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Choqy Pananda'), findsOneWidget);
+    expect(find.text('Mahasiswa Demo'), findsOneWidget);
     expect(find.text('Skala Konversi Nilai Kampus'), findsOneWidget);
   });
 
@@ -170,8 +170,12 @@ void main() {
   testWidgets('Rute sekunder Detail Mata Kuliah dapat dibuka dari Jadwal', (
     tester,
   ) async {
-    await pumpAppAtMobileViewport(tester, initialLocation: '/mata-kuliah/1');
-    expect(find.text('Pemrograman Mobile'), findsOneWidget);
+    final activeCourse = courseRepo.getActiveCourses().first;
+    await pumpAppAtMobileViewport(
+      tester,
+      initialLocation: '/mata-kuliah/${activeCourse.id}',
+    );
+    expect(find.text(activeCourse.name), findsOneWidget);
     expect(find.text('Komponen Penilaian'), findsOneWidget);
   });
 }

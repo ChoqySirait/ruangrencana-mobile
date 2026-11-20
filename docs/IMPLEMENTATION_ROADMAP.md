@@ -33,6 +33,19 @@ Peta jalan ini membagi pengembangan **RuangRencana** menjadi tahapan terukur aga
 
 ---
 
+## Tahap 1.1 — Audit Basis Data & Penyempurnaan Integritas Data (Selesai)
+
+**Tujuan**: Menjamin otoritas data akademik relasional murni, konsistensi data demo fiktif, validasi skala nilai, perlindungan riwayat rekaman, dan konsistensi zona waktu.
+
+- [x] Mengalihkan sumber riwayat semester lampau sepenuhnya ke tabel `academic_terms` dan `courses` (menghapus duplikasi riwayat di `app_preferences`).
+- [x] Menstandarkan data demonstrasi awal yang fiktif, konsisten, dan aman (`Mahasiswa Demo`, `DEMO-001`, `S1 Sistem Informasi`, `Universitas Contoh`).
+- [x] Menerapkan mekanisme perlindungan terhadap penghapusan mata kuliah (`getDependentStats`, blokir penghapusan mata kuliah berpenilaian tanpa `force: true`, dan rekomendasi utama pengarsipan).
+- [x] Memperkuat validasi skala penilaian (`validateGradingScale`: anti-overlap, deteksi celah cakupan nilai, dukungan nilai 100.0 dan 0.0, dan pembulatan desimal ambang).
+- [x] Memastikan konsistensi zona waktu (penyimpanan UTC mutlak di basis data dan konversi waktu lokal di lapisan tampilan).
+- [x] Memperluas pengujian unit dan integrasi untuk memvalidasi seluruh perbaikan integritas data.
+
+---
+
 ## Tahap 2 — Manajemen Tugas Lengkap & Sinkronisasi Beranda
 
 **Tujuan**: Menyempurnakan pengelolaan tugas dan indikator prioritas.

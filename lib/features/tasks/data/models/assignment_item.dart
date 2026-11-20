@@ -55,16 +55,25 @@ class AssignmentItem {
   final String notes;
 
   AssignmentStatus statusAt(DateTime reference) {
-    if (isCompleted) return AssignmentStatus.completed;
-    if (dueDate.isBefore(reference)) return AssignmentStatus.overdue;
+    if (isCompleted) {
+      return AssignmentStatus.completed;
+    }
+    if (dueDate.toUtc().isBefore(reference.toUtc())) {
+      return AssignmentStatus.overdue;
+    }
     return AssignmentStatus.upcoming;
   }
 
   /// Menandai tugas sebagai mendesak jika belum selesai dan terlambat atau
   /// tenggatnya dalam 48 jam ke depan.
   bool isUrgentAt(DateTime reference) {
-    if (isCompleted) return false;
-    final hoursRemaining = dueDate.difference(reference).inHours;
+    if (isCompleted) {
+      return false;
+    }
+    final hoursRemaining = dueDate
+        .toUtc()
+        .difference(reference.toUtc())
+        .inHours;
     return hoursRemaining <= 48;
   }
 

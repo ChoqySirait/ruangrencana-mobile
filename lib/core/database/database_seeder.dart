@@ -57,17 +57,17 @@ abstract final class DatabaseSeeder {
         });
       }
 
-      // 2. Profil Mahasiswa Demonstrasi (Nama tampilan: Choqy Pananda - data fiktif)
+      // 2. Profil Mahasiswa Demonstrasi (Data fiktif konsisten)
       await txn.insert(DatabaseSchema.tableStudentProfiles, {
-        'full_name': 'Choqy Pananda',
-        'student_number': '2024010099',
-        'study_program': 'S1 Teknik Informatika',
-        'institution_name': 'Universitas Nusantara Merdeka',
+        'full_name': 'Mahasiswa Demo',
+        'student_number': 'DEMO-001',
+        'study_program': 'S1 Sistem Informasi',
+        'institution_name': 'Universitas Contoh',
         'created_at': now,
         'updated_at': now,
       });
 
-      // Preferensi Notifikasi & Semester
+      // Preferensi Notifikasi & Target SKS Murni
       await txn.insert(DatabaseSchema.tableAppPreferences, {
         'preference_key': 'notify_class_reminder',
         'preference_value': 'true',
@@ -90,7 +90,7 @@ abstract final class DatabaseSeeder {
       });
 
       // 3. Periode Semester Akademik (3 semester lampau selesai + 1 semester aktif)
-      await txn.insert(DatabaseSchema.tableAcademicTerms, {
+      final term1Id = await txn.insert(DatabaseSchema.tableAcademicTerms, {
         'academic_year': '2024/2025',
         'semester_name': 'Semester 1 (Ganjil)',
         'semester_number': 1,
@@ -101,7 +101,7 @@ abstract final class DatabaseSeeder {
         'created_at': now,
         'updated_at': now,
       });
-      await txn.insert(DatabaseSchema.tableAcademicTerms, {
+      final term2Id = await txn.insert(DatabaseSchema.tableAcademicTerms, {
         'academic_year': '2024/2025',
         'semester_name': 'Semester 2 (Genap)',
         'semester_number': 2,
@@ -112,7 +112,7 @@ abstract final class DatabaseSeeder {
         'created_at': now,
         'updated_at': now,
       });
-      await txn.insert(DatabaseSchema.tableAcademicTerms, {
+      final term3Id = await txn.insert(DatabaseSchema.tableAcademicTerms, {
         'academic_year': '2025/2026',
         'semester_name': 'Semester 3 (Ganjil)',
         'semester_number': 3,
@@ -136,12 +136,208 @@ abstract final class DatabaseSeeder {
         'updated_at': now,
       });
 
-      // Catatan riwayat IPS semester selesai (disimpan pada preferensi/arsip terpisah)
-      await txn.insert(DatabaseSchema.tableAppPreferences, {
-        'preference_key': 'historical_semesters_summary',
-        'preference_value': '[{"label":"Sem 1","sks":19,"ips":3.58},{"label":"Sem 2","sks":21,"ips":3.71},{"label":"Sem 3","sks":20,"ips":3.78}]',
-        'updated_at': now,
-      });
+      // Seeding mata kuliah dan nilai untuk semester lampau (otoritas riwayat akademik relasional murni)
+      Future<void> seedHistoricalTerm({
+        required int termId,
+        required List<Map<String, dynamic>> courses,
+      }) async {
+        for (final c in courses) {
+          final courseId = await txn.insert(DatabaseSchema.tableCourses, {
+            'academic_term_id': termId,
+            'course_code': c['code'],
+            'course_name': c['name'],
+            'credits': c['sks'],
+            'lecturer_name': c['lecturer'],
+            'created_at': now,
+            'updated_at': now,
+          });
+
+          final compId = await txn.insert(
+            DatabaseSchema.tableAssessmentComponents,
+            {
+              'course_id': courseId,
+              'component_name': 'Nilai Akhir',
+              'weight_percentage': 100.0,
+              'is_required': 1,
+              'sort_order': 0,
+              'created_at': now,
+              'updated_at': now,
+            },
+          );
+
+          await txn.insert(DatabaseSchema.tableAssessmentScores, {
+            'assessment_component_id': compId,
+            'score': c['score'],
+            'graded_at': now,
+            'notes': 'Nilai akhir semester selesai',
+          });
+        }
+      }
+
+      await seedHistoricalTerm(
+        termId: term1Id,
+        courses: [
+          {
+            'code': 'SI1101',
+            'name': 'Dasar Sistem Informasi',
+            'sks': 3,
+            'lecturer': 'Dr. Hendra Wijaya, M.Kom.',
+            'score': 88.0,
+          },
+          {
+            'code': 'SI1102',
+            'name': 'Algoritma & Pemrograman',
+            'sks': 4,
+            'lecturer': 'Siti Rahmawati, M.T.',
+            'score': 82.0,
+          },
+          {
+            'code': 'MA1101',
+            'name': 'Matematika Diskrit',
+            'sks': 3,
+            'lecturer': 'Dr. Agus Pratama, M.Sc.',
+            'score': 86.0,
+          },
+          {
+            'code': 'SI1103',
+            'name': 'Pengantar Bisnis & Manajemen',
+            'sks': 3,
+            'lecturer': 'Rina Marlina, S.E., M.M.',
+            'score': 78.0,
+          },
+          {
+            'code': 'KU1101',
+            'name': 'Bahasa Indonesia',
+            'sks': 2,
+            'lecturer': 'Dewi Lestari, M.Pd.',
+            'score': 85.0,
+          },
+          {
+            'code': 'KU1102',
+            'name': 'Bahasa Inggris',
+            'sks': 2,
+            'lecturer': 'Robertus Budi, M.Hum.',
+            'score': 82.0,
+          },
+          {
+            'code': 'KU1103',
+            'name': 'Pendidikan Agama',
+            'sks': 2,
+            'lecturer': 'H. Ahmad Fauzi, M.Ag.',
+            'score': 80.0,
+          },
+        ],
+      );
+
+      await seedHistoricalTerm(
+        termId: term2Id,
+        courses: [
+          {
+            'code': 'SI1201',
+            'name': 'Struktur Data & Algoritma',
+            'sks': 4,
+            'lecturer': 'Dr. Hendra Wijaya, M.Kom.',
+            'score': 86.0,
+          },
+          {
+            'code': 'SI1202',
+            'name': 'Basis Data Dasar',
+            'sks': 4,
+            'lecturer': 'Siti Rahmawati, M.T.',
+            'score': 83.0,
+          },
+          {
+            'code': 'SI1203',
+            'name': 'Sistem Informasi Manajemen',
+            'sks': 3,
+            'lecturer': 'Rina Marlina, S.E., M.M.',
+            'score': 88.0,
+          },
+          {
+            'code': 'MA1201',
+            'name': 'Aljabar Linear',
+            'sks': 3,
+            'lecturer': 'Dr. Agus Pratama, M.Sc.',
+            'score': 77.0,
+          },
+          {
+            'code': 'MA1202',
+            'name': 'Statistika Terapan',
+            'sks': 3,
+            'lecturer': 'Dr. Joko Susilo, M.Stat.',
+            'score': 81.0,
+          },
+          {
+            'code': 'KU1201',
+            'name': 'Pendidikan Kewarganegaraan',
+            'sks': 2,
+            'lecturer': 'Dewi Lestari, M.Pd.',
+            'score': 85.0,
+          },
+          {
+            'code': 'KU1202',
+            'name': 'Komunikasi Interpersonal',
+            'sks': 2,
+            'lecturer': 'Robertus Budi, M.Hum.',
+            'score': 82.0,
+          },
+        ],
+      );
+
+      await seedHistoricalTerm(
+        termId: term3Id,
+        courses: [
+          {
+            'code': 'SI2301',
+            'name': 'Pemrograman Berorientasi Objek',
+            'sks': 4,
+            'lecturer': 'Dr. Hendra Wijaya, M.Kom.',
+            'score': 87.0,
+          },
+          {
+            'code': 'SI2302',
+            'name': 'Analisis & Perancangan SI',
+            'sks': 4,
+            'lecturer': 'Rina Marlina, S.E., M.M.',
+            'score': 86.0,
+          },
+          {
+            'code': 'SI2303',
+            'name': 'Basis Data Lanjutan',
+            'sks': 3,
+            'lecturer': 'Siti Rahmawati, M.T.',
+            'score': 82.0,
+          },
+          {
+            'code': 'SI2304',
+            'name': 'Jaringan Komputer',
+            'sks': 3,
+            'lecturer': 'Ir. Bambang Tri, M.T.',
+            'score': 78.0,
+          },
+          {
+            'code': 'SI2305',
+            'name': 'Arsitektur Perusahaan',
+            'sks': 2,
+            'lecturer': 'Dr. Agus Pratama, M.Sc.',
+            'score': 85.0,
+          },
+          {
+            'code': 'KU2301',
+            'name': 'Etika Profesi Sistem Informasi',
+            'sks': 2,
+            'lecturer': 'Dewi Lestari, M.Pd.',
+            'score': 84.0,
+          },
+          {
+            'code': 'KU2302',
+            'name': 'Technopreneurship',
+            'sks': 2,
+            'lecturer': 'H. Ahmad Fauzi, M.Ag.',
+            'score': 82.0,
+          },
+        ],
+      );
 
       // 4. Mata Kuliah Semester 4
       final coursesData = [

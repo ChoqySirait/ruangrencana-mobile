@@ -1,8 +1,37 @@
+import 'package:sqflite/sqflite.dart';
+
 import '../../../../core/database/app_database.dart';
 import '../../../../core/database/database_schema.dart';
+import '../../../../core/errors/app_failure.dart';
 import '../../../../core/utils/academic_calculator.dart';
 import '../../../../core/utils/date_formatter.dart';
 import '../models/course_item.dart';
+
+/// Statistik rekaman terkait suatu mata kuliah untuk perlindungan integritas akademik.
+class CourseDependentStats {
+  const CourseDependentStats({
+    required this.scheduleCount,
+    required this.assignmentCount,
+    required this.componentCount,
+    required this.scoreCount,
+    required this.isTermActive,
+  });
+
+  final int scheduleCount;
+  final int assignmentCount;
+  final int componentCount;
+  final int scoreCount;
+  final bool isTermActive;
+
+  /// Bernilai `true` jika mata kuliah memiliki riwayat penilaian atau berada di semester lampau.
+  bool get hasAcademicHistory => scoreCount > 0 || !isTermActive;
+
+  bool get hasDependentRecords =>
+      scheduleCount > 0 ||
+      assignmentCount > 0 ||
+      componentCount > 0 ||
+      scoreCount > 0;
+}
 
 /// Kontrak akses dan manipulasi data mata kuliah beserta komponen penilaiannya.
 abstract class CourseRepository {
@@ -27,8 +56,9 @@ abstract class CourseRepository {
     required String lecturer,
   });
 
+  Future<CourseDependentStats> getDependentStats(String id);
   Future<void> archiveCourse(String id);
-  Future<void> deleteCourse(String id);
+  Future<void> deleteCourse(String id, {bool force = false});
 
   Future<int> addAssessmentComponent({
     required String courseId,
@@ -229,13 +259,122 @@ class SqliteCourseRepository implements CourseRepository {
   }
 
   @override
-  Future<void> deleteCourse(String id) async {
+  Future<CourseDependentStats> getDependentStats(String id) async {
     final db = await appDatabase.database;
-    await db.delete(
-      DatabaseSchema.tableCourses,
-      where: 'id = ?',
-      whereArgs: [int.tryParse(id) ?? id],
+    final cId = int.tryParse(id) ?? id;
+
+    final courseRow = await db.rawQuery(
+      '''
+      SELECT c.id, t.is_active
+      FROM ${DatabaseSchema.tableCourses} c
+      JOIN ${DatabaseSchema.tableAcademicTerms} t ON t.id = c.academic_term_id
+      WHERE c.id = ?
+      ''',
+      [cId],
     );
+
+    final isTermActive = courseRow.isNotEmpty
+        ? (courseRow.first['is_active'] as int) == 1
+        : true;
+
+    final schedCount =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM ${DatabaseSchema.tableClassSchedules} WHERE course_id = ?',
+            [cId],
+          ),
+        ) ??
+        0;
+
+    final assignCount =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM ${DatabaseSchema.tableAssignments} WHERE course_id = ?',
+            [cId],
+          ),
+        ) ??
+        0;
+
+    final compCount =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM ${DatabaseSchema.tableAssessmentComponents} WHERE course_id = ?',
+            [cId],
+          ),
+        ) ??
+        0;
+
+    final scoreCount =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            '''
+      SELECT COUNT(*) FROM ${DatabaseSchema.tableAssessmentScores}
+      WHERE assessment_component_id IN (
+        SELECT id FROM ${DatabaseSchema.tableAssessmentComponents}
+        WHERE course_id = ?
+      )
+      ''',
+            [cId],
+          ),
+        ) ??
+        0;
+
+    return CourseDependentStats(
+      scheduleCount: schedCount,
+      assignmentCount: assignCount,
+      componentCount: compCount,
+      scoreCount: scoreCount,
+      isTermActive: isTermActive,
+    );
+  }
+
+  @override
+  Future<void> deleteCourse(String id, {bool force = false}) async {
+    final stats = await getDependentStats(id);
+
+    // Perlindungan Rekaman Akademik: cegah penghapusan tidak sengaja jika sudah memiliki riwayat nilai
+    if (stats.hasAcademicHistory && !force) {
+      throw AppFailure(
+        'Mata kuliah memiliki riwayat penilaian akademik. Disarankan untuk mengarsipkan mata kuliah daripada menghapus permanen.',
+        code: 'COURSE_HAS_ACADEMIC_HISTORY',
+      );
+    }
+
+    final cId = int.tryParse(id) ?? id;
+
+    // Eksekusi penghapusan dalam transaksi atomik untuk mencegah orphaned assessment scores
+    await appDatabase.transaction((txn) async {
+      await txn.rawDelete(
+        '''
+        DELETE FROM ${DatabaseSchema.tableAssessmentScores}
+        WHERE assessment_component_id IN (
+          SELECT id FROM ${DatabaseSchema.tableAssessmentComponents}
+          WHERE course_id = ?
+        )
+        ''',
+        [cId],
+      );
+      await txn.delete(
+        DatabaseSchema.tableAssessmentComponents,
+        where: 'course_id = ?',
+        whereArgs: [cId],
+      );
+      await txn.delete(
+        DatabaseSchema.tableAssignments,
+        where: 'course_id = ?',
+        whereArgs: [cId],
+      );
+      await txn.delete(
+        DatabaseSchema.tableClassSchedules,
+        where: 'course_id = ?',
+        whereArgs: [cId],
+      );
+      await txn.delete(
+        DatabaseSchema.tableCourses,
+        where: 'id = ?',
+        whereArgs: [cId],
+      );
+    });
 
     await load();
   }
@@ -367,10 +506,24 @@ class InMemoryCourseRepository implements CourseRepository {
   }) async {}
 
   @override
-  Future<void> archiveCourse(String id) async {}
+  Future<CourseDependentStats> getDependentStats(String id) async =>
+      const CourseDependentStats(
+        scheduleCount: 0,
+        assignmentCount: 0,
+        componentCount: 0,
+        scoreCount: 0,
+        isTermActive: true,
+      );
 
   @override
-  Future<void> deleteCourse(String id) async {}
+  Future<void> archiveCourse(String id) async {
+    _courses.removeWhere((c) => c.id == id);
+  }
+
+  @override
+  Future<void> deleteCourse(String id, {bool force = false}) async {
+    _courses.removeWhere((c) => c.id == id);
+  }
 
   @override
   Future<int> addAssessmentComponent({

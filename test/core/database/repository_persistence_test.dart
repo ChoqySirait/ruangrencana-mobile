@@ -2,7 +2,10 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ruangrencana/core/database/app_database.dart';
+import 'package:ruangrencana/core/database/database_schema.dart';
 import 'package:ruangrencana/core/database/database_seeder.dart';
+import 'package:ruangrencana/core/errors/app_failure.dart';
+import 'package:ruangrencana/core/utils/date_formatter.dart';
 import 'package:ruangrencana/features/academic/grades/data/repositories/academic_repository.dart';
 import 'package:ruangrencana/features/academic/simulator/presentation/view_models/grade_simulator_view_model.dart';
 import 'package:ruangrencana/features/courses/data/repositories/course_repository.dart';
@@ -133,13 +136,13 @@ void main() {
       await profileRepo1.load();
 
       final current = profileRepo1.getProfile();
-      expect(current.fullName, contains('Choqy'));
+      expect(current.fullName, contains('Mahasiswa Demo'));
 
       // Ubah profil
       final updated = current.copyWith(
-        fullName: 'Choqy Pananda Sirait, S.Kom.',
+        fullName: 'Mahasiswa Berprestasi',
         university: 'Institut Teknologi Harapan Bangsa',
-        studyProgram: 'S1 Rekayasa Perangkat Lunak',
+        studyProgram: 'S1 Sistem Informasi Terapan',
         notifyWeeklySummary: true,
       );
       await profileRepo1.saveProfile(updated);
@@ -153,9 +156,9 @@ void main() {
       await profileRepo2.load();
 
       final reloaded = profileRepo2.getProfile();
-      expect(reloaded.fullName, 'Choqy Pananda Sirait, S.Kom.');
+      expect(reloaded.fullName, 'Mahasiswa Berprestasi');
       expect(reloaded.university, 'Institut Teknologi Harapan Bangsa');
-      expect(reloaded.studyProgram, 'S1 Rekayasa Perangkat Lunak');
+      expect(reloaded.studyProgram, 'S1 Sistem Informasi Terapan');
       expect(reloaded.notifyWeeklySummary, isTrue);
 
       await appDb2.close();
@@ -174,8 +177,8 @@ void main() {
       // 1. Tambah mata kuliah baru
       final newCourseId = await courseRepo1.insertCourse(
         termId: 4,
-        code: 'IF3999',
-        name: 'Arsitektur Perangkat Lunak Lanjut',
+        code: 'SI3999',
+        name: 'Arsitektur Sistem Informasi Lanjut',
         credits: 4,
         lecturer: 'Dr. Tech Mentor, M.T.',
       );
@@ -212,7 +215,7 @@ void main() {
 
       final course = courseRepo2.getCourseById(newCourseId.toString());
       expect(course, isNotNull);
-      expect(course!.code, 'IF3999');
+      expect(course!.code, 'SI3999');
       expect(course.sks, 4);
       expect(course.assessmentComponents.length, 1);
       expect(course.assessmentComponents.first.score, 95.0);
@@ -220,7 +223,7 @@ void main() {
       expect(course.gradeCalculation.finalScore, 95.0);
 
       final schedules = schedRepo2.getSchedulesForDay(5);
-      expect(schedules.any((s) => s.courseCode == 'IF3999'), isTrue);
+      expect(schedules.any((s) => s.courseCode == 'SI3999'), isTrue);
 
       await appDb2.close();
     });
@@ -260,5 +263,182 @@ void main() {
         await appDb.close();
       },
     );
+
+    test('Otoritas Riwayat Akademik dari academic_terms dan courses (Bukan app_preferences)', () async {
+      final appDb = AppDatabase(databaseFactory: databaseFactoryFfi);
+      final db = await appDb.open(customPath: dbFilePath);
+      await DatabaseSeeder.seedIfNeeded(db);
+
+      // Verifikasi bahwa app_preferences TIDAK menyimpan 'historical_semesters_summary'
+      final prefCheck = await db.query(
+        DatabaseSchema.tableAppPreferences,
+        where: 'preference_key = ?',
+        whereArgs: ['historical_semesters_summary'],
+      );
+      expect(
+        prefCheck,
+        isEmpty,
+        reason:
+            'app_preferences tidak boleh menyimpan duplikasi riwayat akademik',
+      );
+
+      final courseRepo = SqliteCourseRepository(appDatabase: appDb);
+      final academicRepo = SqliteAcademicRepository(
+        appDatabase: appDb,
+        courseRepository: courseRepo,
+      );
+
+      await courseRepo.load();
+      await academicRepo.load();
+
+      final overview = academicRepo.getAcademicOverview();
+
+      // Verifikasi riwayat semester berasal dari academic_terms (Sem 1, Sem 2, Sem 3)
+      expect(overview.historicalSemesters.length, 3);
+      expect(overview.historicalSemesters[0].semesterLabel, 'Sem 1');
+      expect(overview.historicalSemesters[0].sks, 19);
+      expect(overview.historicalSemesters[0].ips, greaterThan(3.5));
+
+      expect(overview.historicalSemesters[1].semesterLabel, 'Sem 2');
+      expect(overview.historicalSemesters[1].sks, 21);
+      expect(overview.historicalSemesters[1].ips, greaterThan(3.5));
+
+      expect(overview.historicalSemesters[2].semesterLabel, 'Sem 3');
+      expect(overview.historicalSemesters[2].sks, 20);
+      expect(overview.historicalSemesters[2].ips, greaterThan(3.5));
+
+      expect(overview.completedSksBeforeActive, 60);
+      expect(overview.cumulativeIpk, greaterThan(3.5));
+
+      await appDb.close();
+    });
+
+    test(
+      'Idempotensi dan Konsistensi Seeder Demo (Mahasiswa Demo, DEMO-001)',
+      () async {
+        final appDb = AppDatabase(databaseFactory: databaseFactoryFfi);
+        final db = await appDb.open(customPath: dbFilePath);
+
+        // Seeding pertama
+        final firstSeed = await DatabaseSeeder.seedIfNeeded(db);
+        expect(firstSeed, isTrue);
+
+        // Seeding kedua (harus idempotent / return false tanpa modifikasi)
+        final secondSeed = await DatabaseSeeder.seedIfNeeded(db);
+        expect(secondSeed, isFalse);
+
+        final profileRepo = SqliteProfileRepository(appDatabase: appDb);
+        await profileRepo.load();
+
+        final p = profileRepo.getProfile();
+        expect(p.fullName, 'Mahasiswa Demo');
+        expect(p.studentId, 'DEMO-001');
+        expect(p.studyProgram, 'S1 Sistem Informasi');
+        expect(p.university, 'Universitas Contoh');
+
+        await appDb.close();
+      },
+    );
+
+    test(
+      'Perlindungan Rekaman Akademik pada Penghapusan Mata Kuliah',
+      () async {
+        final appDb = AppDatabase(databaseFactory: databaseFactoryFfi);
+        final db = await appDb.open(customPath: dbFilePath);
+        await DatabaseSeeder.seedIfNeeded(db);
+
+        final courseRepo = SqliteCourseRepository(appDatabase: appDb);
+        await courseRepo.load();
+
+        // Ambil mata kuliah pertama semester aktif (yang sudah memiliki komponen penilaian dan skor)
+        final activeCourses = courseRepo.getActiveCourses();
+        expect(activeCourses, isNotEmpty);
+        final courseWithGrades = activeCourses.first;
+
+        // Cek statistik dependensi
+        final stats = await courseRepo.getDependentStats(courseWithGrades.id);
+        expect(stats.hasAcademicHistory, isTrue);
+        expect(stats.scoreCount, greaterThan(0));
+
+        // 1. Penghapusan tanpa force HARUS gagal dan melempar AppFailure
+        expect(
+          () => courseRepo.deleteCourse(courseWithGrades.id, force: false),
+          throwsA(
+            isA<AppFailure>().having(
+              (e) => e.code,
+              'code',
+              'COURSE_HAS_ACADEMIC_HISTORY',
+            ),
+          ),
+        );
+
+        // 2. Pengarsipan (archiveCourse) adalah operasi yang direkomendasikan dan berhasil
+        await courseRepo.archiveCourse(courseWithGrades.id);
+        expect(courseRepo.getCourseById(courseWithGrades.id), isNull);
+
+        // 3. Penghapusan dengan force: true berhasil menghapus secara bersih tanpa meninggalkan orphan scores
+        await courseRepo.deleteCourse(courseWithGrades.id, force: true);
+
+        final orphanScores = await db.rawQuery('''
+        SELECT COUNT(*) as count FROM ${DatabaseSchema.tableAssessmentScores} s
+        LEFT JOIN ${DatabaseSchema.tableAssessmentComponents} c ON c.id = s.assessment_component_id
+        WHERE c.id IS NULL
+        ''');
+        expect(
+          orphanScores.first['count'],
+          0,
+          reason: 'Tidak boleh ada assessment score yang menjadi yatim piatu',
+        );
+
+        await appDb.close();
+      },
+    );
+
+    test('Konsistensi Zona Waktu & Tenggat Tugas', () async {
+      final appDb = AppDatabase(databaseFactory: databaseFactoryFfi);
+      final db = await appDb.open(customPath: dbFilePath);
+      await DatabaseSeeder.seedIfNeeded(db);
+
+      final taskRepo = SqliteTaskRepository(appDatabase: appDb);
+      await taskRepo.load();
+
+      // Buat tugas dengan tenggat waktu spesifik
+      final targetUtc = DateTime.utc(2026, 12, 10, 16, 59, 0);
+      final taskItem = AssignmentItem(
+        id: 'tz-test',
+        title: 'Tugas Uji Timezone',
+        courseId: '1',
+        courseName: 'Pemrograman Mobile',
+        dueDate: targetUtc,
+        priority: AssignmentPriority.high,
+      );
+      await taskRepo.addAssignment(taskItem);
+
+      await appDb.close();
+
+      // Buka kembali database dan verifikasi
+      final appDb2 = AppDatabase(databaseFactory: databaseFactoryFfi);
+      await appDb2.open(customPath: dbFilePath);
+      final taskRepo2 = SqliteTaskRepository(appDatabase: appDb2);
+      await taskRepo2.load();
+
+      final loaded = taskRepo2.getAllAssignments().firstWhere(
+        (t) => t.title == 'Tugas Uji Timezone',
+      );
+      expect(loaded.dueDate.toUtc(), targetUtc);
+
+      // Format lokal via DateFormatter tidak boleh menghasilkan pergeseran negatif
+      final formatted = DateFormatter.shortDateWithTime(loaded.dueDate);
+      expect(formatted, contains('Des'));
+
+      // Uji status tenggat waktu
+      final pastReference = DateTime.utc(2026, 12, 15, 0, 0, 0);
+      expect(loaded.statusAt(pastReference), AssignmentStatus.overdue);
+
+      final futureReference = DateTime.utc(2026, 12, 1, 0, 0, 0);
+      expect(loaded.statusAt(futureReference), AssignmentStatus.upcoming);
+
+      await appDb2.close();
+    });
   });
 }

@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:ruangrencana/core/database/app_database.dart';
 import 'package:ruangrencana/core/database/database_schema.dart';
 import 'package:ruangrencana/core/utils/academic_calculator.dart';
@@ -102,7 +100,7 @@ class SqliteAcademicRepository implements AcademicRepository {
         }),
       );
 
-    // 4. Ambil ringkasan riwayat semester lampau & target SKS dari app_preferences
+    // 4. Target SKS kelulusan dari preferensi aplikasi murni
     final prefRows = await db.query(DatabaseSchema.tableAppPreferences);
     final prefMap = {
       for (final r in prefRows)
@@ -114,23 +112,107 @@ class SqliteAcademicRepository implements AcademicRepository {
           int.tryParse(prefMap['target_graduation_sks']!) ?? 144;
     }
 
+    // 5. Hitung riwayat semester lampau secara otoritatif dari academic_terms dan courses
+    final pastTerms = await db.query(
+      DatabaseSchema.tableAcademicTerms,
+      where: 'is_active = 0',
+      orderBy: 'semester_number ASC',
+    );
+
     _historicalSemesters.clear();
-    final historyJson = prefMap['historical_semesters_summary'];
-    if (historyJson != null) {
-      try {
-        final List<dynamic> parsed = jsonDecode(historyJson);
-        for (final item in parsed) {
-          _historicalSemesters.add(
-            SemesterGpaRecord(
-              semesterLabel: item['label'] as String,
-              sks: item['sks'] as int,
-              ips: (item['ips'] as num).toDouble(),
-            ),
-          );
-        }
-      } catch (_) {
-        // Abaikan kegagalan parsing JSON
+
+    for (final term in pastTerms) {
+      final termId = term['id'] as int;
+      final semNumber = term['semester_number'] as int;
+      final termScaleId = term['grading_scale_id'] as int;
+
+      // Ambil aturan skala nilai untuk semester ini
+      final List<GradeScaleRule> termRules;
+      if (termScaleId == scaleId) {
+        termRules = _activeScaleRules;
+      } else {
+        final termRanges = await db.query(
+          DatabaseSchema.tableGradingScaleRanges,
+          where: 'grading_scale_id = ?',
+          whereArgs: [termScaleId],
+          orderBy: 'minimum_score DESC',
+        );
+        termRules = termRanges
+            .map(
+              (r) => GradeScaleRule(
+                minScore: (r['minimum_score'] as num).toDouble(),
+                maxScore: (r['maximum_score'] as num).toDouble(),
+                letter: r['letter_grade'] as String,
+                gradePoint: (r['grade_point'] as num).toDouble(),
+              ),
+            )
+            .toList(growable: false);
       }
+
+      // Ambil seluruh mata kuliah pada semester lampau ini
+      final termCourses = await db.query(
+        DatabaseSchema.tableCourses,
+        where: 'academic_term_id = ? AND archived_at IS NULL',
+        whereArgs: [termId],
+      );
+
+      if (termCourses.isEmpty) continue;
+
+      var termTotalSks = 0;
+      final termWeightedPoints = <WeightedGradePoint>[];
+
+      for (final cRow in termCourses) {
+        final cId = cRow['id'] as int;
+        final sks = cRow['credits'] as int;
+        termTotalSks += sks;
+
+        final compRows = await db.rawQuery(
+          '''
+          SELECT c.weight_percentage, c.is_required, s.score
+          FROM ${DatabaseSchema.tableAssessmentComponents} c
+          LEFT JOIN ${DatabaseSchema.tableAssessmentScores} s
+            ON s.assessment_component_id = c.id
+          WHERE c.course_id = ?
+          ''',
+          [cId],
+        );
+
+        final components = compRows
+            .map((cr) {
+              final sVal = cr['score'];
+              return AssessmentComponentInput(
+                name: '',
+                weightPercent: (cr['weight_percentage'] as num).toDouble(),
+                isMandatory: (cr['is_required'] as int) == 1,
+                score: sVal != null ? (sVal as num).toDouble() : null,
+              );
+            })
+            .toList(growable: false);
+
+        final calc = AcademicCalculator.calculateCourseGrade(components);
+        if (calc.provisionalAverage != null) {
+          final rule = AcademicCalculator.resolveGradeRule(
+            calc.provisionalAverage!,
+            termRules,
+          );
+          if (rule != null) {
+            termWeightedPoints.add(
+              WeightedGradePoint(sks: sks, gradePoint: rule.gradePoint),
+            );
+          }
+        }
+      }
+
+      final termIps = AcademicCalculator.calculateWeightedGpa(
+        termWeightedPoints,
+      );
+      _historicalSemesters.add(
+        SemesterGpaRecord(
+          semesterLabel: 'Sem $semNumber',
+          sks: termTotalSks,
+          ips: termIps,
+        ),
+      );
     }
   }
 
