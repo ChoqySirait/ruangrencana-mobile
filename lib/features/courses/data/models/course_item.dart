@@ -1,4 +1,41 @@
-import '../../../../core/utils/academic_calculator.dart';
+import 'package:ruangrencana/core/utils/academic_calculator.dart';
+
+/// Model komponen penilaian mata kuliah yang tersimpan di basis data SQLite.
+class CourseAssessmentComponent extends AssessmentComponentInput {
+  const CourseAssessmentComponent({
+    this.id = 0,
+    required super.name,
+    required super.weightPercent,
+    super.score,
+    super.isMandatory = true,
+    this.sortOrder = 0,
+    this.notes = '',
+  });
+
+  final int id;
+  final int sortOrder;
+  final String notes;
+
+  CourseAssessmentComponent copyWith({
+    int? id,
+    String? name,
+    double? weightPercent,
+    double? score,
+    bool? isMandatory,
+    int? sortOrder,
+    String? notes,
+  }) {
+    return CourseAssessmentComponent(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      weightPercent: weightPercent ?? this.weightPercent,
+      score: score ?? this.score,
+      isMandatory: isMandatory ?? this.isMandatory,
+      sortOrder: sortOrder ?? this.sortOrder,
+      notes: notes ?? this.notes,
+    );
+  }
+}
 
 /// Model data mata kuliah pada semester akademik.
 class CourseItem {
@@ -22,7 +59,7 @@ class CourseItem {
   final String lecturer;
   final String room;
   final String scheduleLabel;
-  final List<AssessmentComponentInput> assessmentComponents;
+  final List<CourseAssessmentComponent> assessmentComponents;
   final int termId;
   final bool isArchived;
 
@@ -38,7 +75,7 @@ class CourseItem {
     String? lecturer,
     String? room,
     String? scheduleLabel,
-    List<AssessmentComponentInput>? assessmentComponents,
+    List<CourseAssessmentComponent>? assessmentComponents,
     int? termId,
     bool? isArchived,
   }) {

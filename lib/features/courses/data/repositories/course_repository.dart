@@ -42,7 +42,7 @@ abstract class CourseRepository {
   });
   Future<void> load();
 
-  // Operasi CRUD
+  // Operasi CRUD Mata Kuliah
   Future<int> insertCourse({
     required int termId,
     required String code,
@@ -65,6 +65,7 @@ abstract class CourseRepository {
   Future<void> unarchiveCourse(String id);
   Future<void> deleteCourse(String id, {bool force = false});
 
+  // Operasi CRUD Komponen Penilaian & Skor
   Future<int> addAssessmentComponent({
     required String courseId,
     required String name,
@@ -72,7 +73,19 @@ abstract class CourseRepository {
     bool isRequired = true,
     int sortOrder = 0,
     double? initialScore,
+    bool validateTotalWeight = false,
   });
+
+  Future<void> updateAssessmentComponent({
+    required int componentId,
+    required String name,
+    required double weightPercent,
+    bool isRequired = true,
+    int sortOrder = 0,
+    bool validateTotalWeight = false,
+  });
+
+  Future<void> deleteAssessmentComponent(int componentId);
 
   Future<void> recordAssessmentScore({
     required int componentId,
@@ -80,7 +93,7 @@ abstract class CourseRepository {
     String notes = '',
   });
 
-  Future<void> deleteAssessmentComponent(int componentId);
+  Future<void> deleteAssessmentScore(int componentId);
 }
 
 /// Implementasi persistensi mata kuliah berbasis SQLite (`sqflite`).
@@ -89,9 +102,17 @@ class SqliteCourseRepository implements CourseRepository {
 
   final AppDatabase appDatabase;
   final List<CourseItem> _cachedCourses = [];
+  int? _activeTermId;
 
   @override
-  List<CourseItem> getActiveCourses() => List.unmodifiable(_cachedCourses);
+  List<CourseItem> getActiveCourses() {
+    if (_activeTermId == null) {
+      return List.unmodifiable(_cachedCourses.where((c) => !c.isArchived));
+    }
+    return List.unmodifiable(
+      _cachedCourses.where((c) => c.termId == _activeTermId && !c.isArchived),
+    );
+  }
 
   @override
   CourseItem? getCourseById(String id) {
@@ -112,18 +133,14 @@ class SqliteCourseRepository implements CourseRepository {
       limit: 1,
     );
 
-    if (activeTerms.isEmpty) {
-      _cachedCourses.clear();
-      return;
-    }
+    _activeTermId = activeTerms.isNotEmpty
+        ? activeTerms.first['id'] as int
+        : null;
 
-    final termId = activeTerms.first['id'] as int;
-
-    // 2. Ambil mata kuliah pada semester aktif yang tidak diarsipkan
+    // 2. Ambil mata kuliah yang tidak diarsipkan
     final courseRows = await db.query(
       DatabaseSchema.tableCourses,
-      where: 'academic_term_id = ? AND archived_at IS NULL',
-      whereArgs: [termId],
+      where: 'archived_at IS NULL',
       orderBy: 'course_code ASC',
     );
 
@@ -194,7 +211,7 @@ class SqliteCourseRepository implements CourseRepository {
       // Ambil komponen penilaian dan skornya
       final compRows = await db.rawQuery(
         '''
-        SELECT c.id as comp_id, c.component_name, c.weight_percentage, c.is_required, s.score
+        SELECT c.id as comp_id, c.component_name, c.weight_percentage, c.is_required, c.sort_order, s.score, s.notes
         FROM ${DatabaseSchema.tableAssessmentComponents} c
         LEFT JOIN ${DatabaseSchema.tableAssessmentScores} s
           ON s.assessment_component_id = c.id
@@ -207,11 +224,14 @@ class SqliteCourseRepository implements CourseRepository {
       final components = compRows
           .map((c) {
             final scoreVal = c['score'];
-            return AssessmentComponentInput(
+            return CourseAssessmentComponent(
+              id: c['comp_id'] as int,
               name: c['component_name'] as String,
               weightPercent: (c['weight_percentage'] as num).toDouble(),
               isMandatory: (c['is_required'] as int) == 1,
               score: scoreVal != null ? (scoreVal as num).toDouble() : null,
+              sortOrder: (c['sort_order'] as int?) ?? 0,
+              notes: (c['notes'] as String?) ?? '',
             );
           })
           .toList(growable: false);
@@ -545,7 +565,20 @@ class SqliteCourseRepository implements CourseRepository {
     bool isRequired = true,
     int sortOrder = 0,
     double? initialScore,
+    bool validateTotalWeight = false,
   }) async {
+    if (name.trim().isEmpty) {
+      throw AppFailure(
+        'Nama komponen penilaian tidak boleh kosong.',
+        code: 'INVALID_COMPONENT_NAME',
+      );
+    }
+    if (weightPercent <= 0.0 || weightPercent > 100.0) {
+      throw AppFailure(
+        'Bobot komponen harus lebih besar dari 0% dan maksimal 100%.',
+        code: 'INVALID_WEIGHT',
+      );
+    }
     if (initialScore != null &&
         !AcademicCalculator.isValidScore(initialScore)) {
       throw AppFailure(
@@ -557,6 +590,25 @@ class SqliteCourseRepository implements CourseRepository {
     final db = await appDatabase.database;
     final now = DateTime.now().toUtc().toIso8601String();
     final cId = int.parse(courseId);
+
+    if (validateTotalWeight) {
+      final weightRow = await db.rawQuery(
+        '''
+        SELECT COALESCE(SUM(weight_percentage), 0) as total_weight
+        FROM ${DatabaseSchema.tableAssessmentComponents}
+        WHERE course_id = ?
+        ''',
+        [cId],
+      );
+      final currentTotal =
+          (weightRow.first['total_weight'] as num?)?.toDouble() ?? 0.0;
+      if (currentTotal + weightPercent > 100.001) {
+        throw AppFailure(
+          'Total bobot penilaian tidak boleh melebihi 100%. Saat ini sudah terisi ${currentTotal.toStringAsFixed(1)}%.',
+          code: 'EXCEEDS_MAX_WEIGHT',
+        );
+      }
+    }
 
     final compId = await db.transaction((txn) async {
       final id = await txn.insert(DatabaseSchema.tableAssessmentComponents, {
@@ -583,6 +635,82 @@ class SqliteCourseRepository implements CourseRepository {
 
     await load();
     return compId;
+  }
+
+  @override
+  Future<void> updateAssessmentComponent({
+    required int componentId,
+    required String name,
+    required double weightPercent,
+    bool isRequired = true,
+    int sortOrder = 0,
+    bool validateTotalWeight = false,
+  }) async {
+    if (name.trim().isEmpty) {
+      throw AppFailure(
+        'Nama komponen penilaian tidak boleh kosong.',
+        code: 'INVALID_COMPONENT_NAME',
+      );
+    }
+    if (weightPercent <= 0.0 || weightPercent > 100.0) {
+      throw AppFailure(
+        'Bobot komponen harus lebih besar dari 0% dan maksimal 100%.',
+        code: 'INVALID_WEIGHT',
+      );
+    }
+
+    final db = await appDatabase.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    final compRow = await db.query(
+      DatabaseSchema.tableAssessmentComponents,
+      where: 'id = ?',
+      whereArgs: [componentId],
+      limit: 1,
+    );
+
+    if (compRow.isEmpty) {
+      throw AppFailure(
+        'Komponen penilaian tidak ditemukan.',
+        code: 'COMPONENT_NOT_FOUND',
+      );
+    }
+
+    final courseId = compRow.first['course_id'] as int;
+
+    if (validateTotalWeight) {
+      final weightRow = await db.rawQuery(
+        '''
+        SELECT COALESCE(SUM(weight_percentage), 0) as total_weight
+        FROM ${DatabaseSchema.tableAssessmentComponents}
+        WHERE course_id = ? AND id != ?
+        ''',
+        [courseId, componentId],
+      );
+      final otherTotal =
+          (weightRow.first['total_weight'] as num?)?.toDouble() ?? 0.0;
+      if (otherTotal + weightPercent > 100.001) {
+        throw AppFailure(
+          'Total bobot penilaian tidak boleh melebihi 100%. Bobot komponen lain sudah ${otherTotal.toStringAsFixed(1)}%.',
+          code: 'EXCEEDS_MAX_WEIGHT',
+        );
+      }
+    }
+
+    await db.update(
+      DatabaseSchema.tableAssessmentComponents,
+      {
+        'component_name': name.trim(),
+        'weight_percentage': weightPercent,
+        'is_required': isRequired ? 1 : 0,
+        'sort_order': sortOrder,
+        'updated_at': now,
+      },
+      where: 'id = ?',
+      whereArgs: [componentId],
+    );
+
+    await load();
   }
 
   @override
@@ -631,13 +759,31 @@ class SqliteCourseRepository implements CourseRepository {
   }
 
   @override
-  Future<void> deleteAssessmentComponent(int componentId) async {
+  Future<void> deleteAssessmentScore(int componentId) async {
     final db = await appDatabase.database;
     await db.delete(
-      DatabaseSchema.tableAssessmentComponents,
-      where: 'id = ?',
+      DatabaseSchema.tableAssessmentScores,
+      where: 'assessment_component_id = ?',
       whereArgs: [componentId],
     );
+
+    await load();
+  }
+
+  @override
+  Future<void> deleteAssessmentComponent(int componentId) async {
+    await appDatabase.transaction((txn) async {
+      await txn.delete(
+        DatabaseSchema.tableAssessmentScores,
+        where: 'assessment_component_id = ?',
+        whereArgs: [componentId],
+      );
+      await txn.delete(
+        DatabaseSchema.tableAssessmentComponents,
+        where: 'id = ?',
+        whereArgs: [componentId],
+      );
+    });
 
     await load();
   }
@@ -810,7 +956,20 @@ class InMemoryCourseRepository implements CourseRepository {
     bool isRequired = true,
     int sortOrder = 0,
     double? initialScore,
+    bool validateTotalWeight = false,
   }) async {
+    if (name.trim().isEmpty) {
+      throw AppFailure(
+        'Nama komponen penilaian tidak boleh kosong.',
+        code: 'INVALID_COMPONENT_NAME',
+      );
+    }
+    if (weightPercent <= 0.0 || weightPercent > 100.0) {
+      throw AppFailure(
+        'Bobot komponen harus lebih besar dari 0% dan maksimal 100%.',
+        code: 'INVALID_WEIGHT',
+      );
+    }
     if (initialScore != null &&
         !AcademicCalculator.isValidScore(initialScore)) {
       throw AppFailure(
@@ -818,7 +977,73 @@ class InMemoryCourseRepository implements CourseRepository {
         code: 'INVALID_SCORE',
       );
     }
+
+    final cIndex = _courses.indexWhere((c) => c.id == courseId);
+    if (cIndex != -1) {
+      final currentTotal = _courses[cIndex].assessmentComponents.fold<double>(
+        0.0,
+        (sum, comp) => sum + comp.weightPercent,
+      );
+      if (validateTotalWeight && currentTotal + weightPercent > 100.001) {
+        throw AppFailure(
+          'Total bobot penilaian tidak boleh melebihi 100%.',
+          code: 'EXCEEDS_MAX_WEIGHT',
+        );
+      }
+      final newCompId = _courses[cIndex].assessmentComponents.length + 1;
+      final updatedComps = [
+        ..._courses[cIndex].assessmentComponents,
+        CourseAssessmentComponent(
+          id: newCompId,
+          name: name.trim(),
+          weightPercent: weightPercent,
+          isMandatory: isRequired,
+          sortOrder: sortOrder,
+          score: initialScore,
+        ),
+      ];
+      _courses[cIndex] = _courses[cIndex].copyWith(
+        assessmentComponents: updatedComps,
+      );
+      return newCompId;
+    }
     return 1;
+  }
+
+  @override
+  Future<void> updateAssessmentComponent({
+    required int componentId,
+    required String name,
+    required double weightPercent,
+    bool isRequired = true,
+    int sortOrder = 0,
+    bool validateTotalWeight = false,
+  }) async {
+    for (var i = 0; i < _courses.length; i++) {
+      final compIdx = _courses[i].assessmentComponents.indexWhere(
+        (c) => c.id == componentId,
+      );
+      if (compIdx != -1) {
+        final otherTotal = _courses[i].assessmentComponents
+            .where((c) => c.id != componentId)
+            .fold<double>(0.0, (sum, comp) => sum + comp.weightPercent);
+        if (validateTotalWeight && otherTotal + weightPercent > 100.001) {
+          throw AppFailure(
+            'Total bobot penilaian tidak boleh melebihi 100%.',
+            code: 'EXCEEDS_MAX_WEIGHT',
+          );
+        }
+        final comps = [..._courses[i].assessmentComponents];
+        comps[compIdx] = comps[compIdx].copyWith(
+          name: name.trim(),
+          weightPercent: weightPercent,
+          isMandatory: isRequired,
+          sortOrder: sortOrder,
+        );
+        _courses[i] = _courses[i].copyWith(assessmentComponents: comps);
+        return;
+      }
+    }
   }
 
   @override
@@ -833,8 +1058,54 @@ class InMemoryCourseRepository implements CourseRepository {
         code: 'INVALID_SCORE',
       );
     }
+
+    final normalized = AcademicCalculator.normalizeScore(score);
+    for (var i = 0; i < _courses.length; i++) {
+      final compIdx = _courses[i].assessmentComponents.indexWhere(
+        (c) => c.id == componentId,
+      );
+      if (compIdx != -1) {
+        final comps = [..._courses[i].assessmentComponents];
+        comps[compIdx] = comps[compIdx].copyWith(
+          score: normalized,
+          notes: notes,
+        );
+        _courses[i] = _courses[i].copyWith(assessmentComponents: comps);
+        return;
+      }
+    }
   }
 
   @override
-  Future<void> deleteAssessmentComponent(int componentId) async {}
+  Future<void> deleteAssessmentScore(int componentId) async {
+    for (var i = 0; i < _courses.length; i++) {
+      final compIdx = _courses[i].assessmentComponents.indexWhere(
+        (c) => c.id == componentId,
+      );
+      if (compIdx != -1) {
+        final comps = [..._courses[i].assessmentComponents];
+        comps[compIdx] = CourseAssessmentComponent(
+          id: comps[compIdx].id,
+          name: comps[compIdx].name,
+          weightPercent: comps[compIdx].weightPercent,
+          isMandatory: comps[compIdx].isMandatory,
+          sortOrder: comps[compIdx].sortOrder,
+          score: null,
+          notes: '',
+        );
+        _courses[i] = _courses[i].copyWith(assessmentComponents: comps);
+        return;
+      }
+    }
+  }
+
+  @override
+  Future<void> deleteAssessmentComponent(int componentId) async {
+    for (var i = 0; i < _courses.length; i++) {
+      final comps = _courses[i].assessmentComponents
+          .where((c) => c.id != componentId)
+          .toList();
+      _courses[i] = _courses[i].copyWith(assessmentComponents: comps);
+    }
+  }
 }

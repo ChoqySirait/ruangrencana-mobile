@@ -57,11 +57,7 @@ void main() {
           endDate: DateTime(2026, 1, 1), // Invalid: end sebelum start
         ),
         throwsA(
-          isA<AppFailure>().having(
-            (e) => e.code,
-            'code',
-            'INVALID_DATE_RANGE',
-          ),
+          isA<AppFailure>().having((e) => e.code, 'code', 'INVALID_DATE_RANGE'),
         ),
       );
 
@@ -99,43 +95,48 @@ void main() {
       expect(created.isActive, isFalse);
     });
 
-    test('Peralihan semester aktif memastikan hanya ada tepat SATU semester aktif', () async {
-      final db = await appDb.open(customPath: dbFilePath);
-      await DatabaseSeeder.seedIfNeeded(db);
+    test(
+      'Peralihan semester aktif memastikan hanya ada tepat SATU semester aktif',
+      () async {
+        final db = await appDb.open(customPath: dbFilePath);
+        await DatabaseSeeder.seedIfNeeded(db);
 
-      final courseRepo = SqliteCourseRepository(appDatabase: appDb);
-      final academicRepo = SqliteAcademicRepository(
-        appDatabase: appDb,
-        courseRepository: courseRepo,
-      );
-      await courseRepo.load();
-      await academicRepo.load();
+        final courseRepo = SqliteCourseRepository(appDatabase: appDb);
+        final academicRepo = SqliteAcademicRepository(
+          appDatabase: appDb,
+          courseRepository: courseRepo,
+        );
+        await courseRepo.load();
+        await academicRepo.load();
 
-      // Awalnya Semester 4 adalah semester aktif
-      final initialActive = academicRepo.getActiveSemester();
-      expect(initialActive, isNotNull);
-      expect(initialActive!.semesterNumber, 4);
+        // Awalnya Semester 4 adalah semester aktif
+        final initialActive = academicRepo.getActiveSemester();
+        expect(initialActive, isNotNull);
+        expect(initialActive!.semesterNumber, 4);
 
-      // Ambil Semester 3
-      final allSemesters = academicRepo.getAllSemesters();
-      final sem3 = allSemesters.firstWhere((s) => s.semesterNumber == 3);
-      expect(sem3.isActive, isFalse);
+        // Ambil Semester 3
+        final allSemesters = academicRepo.getAllSemesters();
+        final sem3 = allSemesters.firstWhere((s) => s.semesterNumber == 3);
+        expect(sem3.isActive, isFalse);
 
-      // Alihkan semester aktif ke Semester 3
-      await academicRepo.setActiveSemester(sem3.id);
+        // Alihkan semester aktif ke Semester 3
+        await academicRepo.setActiveSemester(sem3.id);
 
-      // Verifikasi: Hanya tepat 1 semester yang aktif
-      final activeSemestersAfter =
-          academicRepo.getAllSemesters().where((s) => s.isActive).toList();
-      expect(activeSemestersAfter.length, 1);
-      expect(activeSemestersAfter.first.id, sem3.id);
-      expect(activeSemestersAfter.first.semesterNumber, 3);
+        // Verifikasi: Hanya tepat 1 semester yang aktif
+        final activeSemestersAfter = academicRepo
+            .getAllSemesters()
+            .where((s) => s.isActive)
+            .toList();
+        expect(activeSemestersAfter.length, 1);
+        expect(activeSemestersAfter.first.id, sem3.id);
+        expect(activeSemestersAfter.first.semesterNumber, 3);
 
-      // Verifikasi courseRepo otomatis memuat mata kuliah semester 3
-      final coursesInActiveTerm = courseRepo.getActiveCourses();
-      expect(coursesInActiveTerm, isNotEmpty);
-      expect(coursesInActiveTerm.any((c) => c.code == 'SI2301'), isTrue);
-    });
+        // Verifikasi courseRepo otomatis memuat mata kuliah semester 3
+        final coursesInActiveTerm = courseRepo.getActiveCourses();
+        expect(coursesInActiveTerm, isNotEmpty);
+        expect(coursesInActiveTerm.any((c) => c.code == 'SI2301'), isTrue);
+      },
+    );
 
     test('Proteksi penghapusan semester: semester aktif dan semester berisi mata kuliah tidak dapat dihapus', () async {
       final db = await appDb.open(customPath: dbFilePath);
@@ -164,8 +165,9 @@ void main() {
       );
 
       // 2. Coba hapus semester lampau yang berisi mata kuliah -> harus ditolak
-      final sem1 =
-          academicRepo.getAllSemesters().firstWhere((s) => s.semesterNumber == 1);
+      final sem1 = academicRepo.getAllSemesters().firstWhere(
+        (s) => s.semesterNumber == 1,
+      );
       expect(
         () => academicRepo.deleteSemester(sem1.id),
         throwsA(
@@ -213,11 +215,7 @@ void main() {
           lecturer: 'Dosen X',
         ),
         throwsA(
-          isA<AppFailure>().having(
-            (e) => e.code,
-            'code',
-            'INVALID_CREDITS',
-          ),
+          isA<AppFailure>().having((e) => e.code, 'code', 'INVALID_CREDITS'),
         ),
       );
 
@@ -267,8 +265,9 @@ void main() {
         activeTermId,
         includeArchived: true,
       );
-      final archivedCourse =
-          allSemesterCourses.firstWhere((c) => c.id == newCourseId.toString());
+      final archivedCourse = allSemesterCourses.firstWhere(
+        (c) => c.id == newCourseId.toString(),
+      );
       expect(archivedCourse.isArchived, isTrue);
 
       // 5. Pembatalan arsip (unarchive)
@@ -277,60 +276,63 @@ void main() {
       expect(restoredList.any((c) => c.id == newCourseId.toString()), isTrue);
     });
 
-    test('Persistensi perubahan semester dan mata kuliah antar restart database', () async {
-      // Sesi 1
-      final db1 = await appDb.open(customPath: dbFilePath);
-      await DatabaseSeeder.seedIfNeeded(db1);
+    test(
+      'Persistensi perubahan semester dan mata kuliah antar restart database',
+      () async {
+        // Sesi 1
+        final db1 = await appDb.open(customPath: dbFilePath);
+        await DatabaseSeeder.seedIfNeeded(db1);
 
-      final courseRepo1 = SqliteCourseRepository(appDatabase: appDb);
-      final academicRepo1 = SqliteAcademicRepository(
-        appDatabase: appDb,
-        courseRepository: courseRepo1,
-      );
-      await courseRepo1.load();
-      await academicRepo1.load();
+        final courseRepo1 = SqliteCourseRepository(appDatabase: appDb);
+        final academicRepo1 = SqliteAcademicRepository(
+          appDatabase: appDb,
+          courseRepository: courseRepo1,
+        );
+        await courseRepo1.load();
+        await academicRepo1.load();
 
-      final createdSemId = await academicRepo1.createSemester(
-        academicYear: '2027/2028',
-        semesterName: 'Semester 7 (Ganjil)',
-        semesterNumber: 7,
-      );
+        final createdSemId = await academicRepo1.createSemester(
+          academicYear: '2027/2028',
+          semesterName: 'Semester 7 (Ganjil)',
+          semesterNumber: 7,
+        );
 
-      final createdCourseId = await courseRepo1.insertCourse(
-        termId: createdSemId,
-        code: 'SI4701',
-        name: 'Kapita Selekta Sistem Informasi',
-        credits: 4,
-        lecturer: 'Prof. Dr. Hendra',
-      );
+        final createdCourseId = await courseRepo1.insertCourse(
+          termId: createdSemId,
+          code: 'SI4701',
+          name: 'Kapita Selekta Sistem Informasi',
+          credits: 4,
+          lecturer: 'Prof. Dr. Hendra',
+        );
 
-      await appDb.close();
+        await appDb.close();
 
-      // Sesi 2: Buka kembali database dari disk dengan instance AppDatabase baru
-      final appDb2 = AppDatabase(databaseFactory: databaseFactoryFfi);
-      await appDb2.open(customPath: dbFilePath);
+        // Sesi 2: Buka kembali database dari disk dengan instance AppDatabase baru
+        final appDb2 = AppDatabase(databaseFactory: databaseFactoryFfi);
+        await appDb2.open(customPath: dbFilePath);
 
-      final courseRepo2 = SqliteCourseRepository(appDatabase: appDb2);
-      final academicRepo2 = SqliteAcademicRepository(
-        appDatabase: appDb2,
-        courseRepository: courseRepo2,
-      );
-      await courseRepo2.load();
-      await academicRepo2.load();
+        final courseRepo2 = SqliteCourseRepository(appDatabase: appDb2);
+        final academicRepo2 = SqliteAcademicRepository(
+          appDatabase: appDb2,
+          courseRepository: courseRepo2,
+        );
+        await courseRepo2.load();
+        await academicRepo2.load();
 
-      final reloadedSem = academicRepo2.getSemesterById(createdSemId);
-      expect(reloadedSem, isNotNull);
-      expect(reloadedSem!.semesterName, 'Semester 7 (Ganjil)');
-      expect(reloadedSem.courseCount, 1);
-      expect(reloadedSem.totalCredits, 4);
+        final reloadedSem = academicRepo2.getSemesterById(createdSemId);
+        expect(reloadedSem, isNotNull);
+        expect(reloadedSem!.semesterName, 'Semester 7 (Ganjil)');
+        expect(reloadedSem.courseCount, 1);
+        expect(reloadedSem.totalCredits, 4);
 
-      final semCourses = await courseRepo2.getCoursesBySemester(createdSemId);
-      expect(semCourses.length, 1);
-      expect(semCourses.first.id, createdCourseId.toString());
-      expect(semCourses.first.code, 'SI4701');
+        final semCourses = await courseRepo2.getCoursesBySemester(createdSemId);
+        expect(semCourses.length, 1);
+        expect(semCourses.first.id, createdCourseId.toString());
+        expect(semCourses.first.code, 'SI4701');
 
-      await appDb2.close();
-    });
+        await appDb2.close();
+      },
+    );
 
     test('Interaksi SemesterViewModel dan CoursesViewModel', () async {
       final db = await appDb.open(customPath: dbFilePath);
@@ -380,7 +382,15 @@ void main() {
       coursesVm.selectSemester(sem2.id);
       await coursesVm.loadCourses();
       expect(coursesVm.courses.length, 7);
-      expect(coursesVm.courses.every((c) => c.code.startsWith('SI12') || c.code.startsWith('MA12') || c.code.startsWith('KU12')), isTrue);
+      expect(
+        coursesVm.courses.every(
+          (c) =>
+              c.code.startsWith('SI12') ||
+              c.code.startsWith('MA12') ||
+              c.code.startsWith('KU12'),
+        ),
+        isTrue,
+      );
 
       // Test pengarsipan melalui CoursesViewModel
       final courseToArchive = coursesVm.courses.first;

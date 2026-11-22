@@ -33,6 +33,11 @@ class ScheduleViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> refresh() async {
+    await _repository.load();
+    notifyListeners();
+  }
+
   static int _normalizeWeekday(int weekday) {
     if (weekday < 1 || weekday > 6) return 1;
     return weekday;

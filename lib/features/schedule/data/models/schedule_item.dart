@@ -11,6 +11,7 @@ class ScheduleItem {
     required this.room,
     required this.sks,
     required this.lecturer,
+    this.isActiveTerm = true,
   });
 
   final String id;
@@ -25,6 +26,7 @@ class ScheduleItem {
   final String room;
   final int sks;
   final String lecturer;
+  final bool isActiveTerm;
 
   String get timeRange => '$startTime - $endTime';
 }
