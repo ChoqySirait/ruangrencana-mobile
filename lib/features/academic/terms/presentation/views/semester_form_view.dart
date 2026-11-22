@@ -5,6 +5,7 @@ import 'package:ruangrencana/app/theme/app_colors.dart';
 import 'package:ruangrencana/app/theme/app_spacing.dart';
 import 'package:ruangrencana/app/theme/app_text_styles.dart';
 import 'package:ruangrencana/core/utils/date_formatter.dart';
+import 'package:ruangrencana/features/academic/grades/data/repositories/academic_repository.dart';
 import 'package:ruangrencana/features/academic/terms/data/models/academic_term_item.dart';
 import 'package:ruangrencana/features/academic/terms/presentation/view_models/semester_view_model.dart';
 
@@ -27,6 +28,7 @@ class _SemesterFormViewState extends State<SemesterFormView> {
 
   DateTime? _startDate;
   DateTime? _endDate;
+  int? _gradingScaleId;
   bool _makeActive = false;
   bool _isInit = false;
   AcademicTermItem? _existingTerm;
@@ -46,6 +48,10 @@ class _SemesterFormViewState extends State<SemesterFormView> {
     super.didChangeDependencies();
     if (!_isInit) {
       _isInit = true;
+      final academicRepo = context.read<AcademicRepository>();
+      final defScale = academicRepo.getDefaultGradingScale();
+      _gradingScaleId = defScale?.id ?? 1;
+
       if (widget.termId != null) {
         final id = int.tryParse(widget.termId!);
         if (id != null) {
@@ -57,6 +63,7 @@ class _SemesterFormViewState extends State<SemesterFormView> {
             _numberController.text = _existingTerm!.semesterNumber.toString();
             _startDate = _existingTerm!.startDate;
             _endDate = _existingTerm!.endDate;
+            _gradingScaleId = _existingTerm!.gradingScaleId;
             _makeActive = _existingTerm!.isActive;
           }
         }
@@ -121,6 +128,7 @@ class _SemesterFormViewState extends State<SemesterFormView> {
         semesterNumber: semNumber,
         startDate: _startDate,
         endDate: _endDate,
+        gradingScaleId: _gradingScaleId,
       );
 
       if (_makeActive && !_existingTerm!.isActive) {
@@ -140,6 +148,7 @@ class _SemesterFormViewState extends State<SemesterFormView> {
         semesterNumber: semNumber,
         startDate: _startDate,
         endDate: _endDate,
+        gradingScaleId: _gradingScaleId,
         makeActive: _makeActive,
       );
 
@@ -235,6 +244,33 @@ class _SemesterFormViewState extends State<SemesterFormView> {
                   return 'Nomor semester harus berupa angka positif (minimal 1)';
                 }
                 return null;
+              },
+            ),
+            const SizedBox(height: AppSpacing.md),
+
+            // Pilihan Skala Penilaian Kampus
+            DropdownButtonFormField<int>(
+              initialValue: _gradingScaleId,
+              decoration: const InputDecoration(
+                labelText: 'Skala Penilaian Kampus',
+                hintText: 'Pilih aturan konversi nilai',
+                prefixIcon: Icon(Icons.tune_outlined),
+                helperText: 'Skala konversi nilai angka (0-100) ke huruf mutu untuk semester ini.',
+              ),
+              items: context
+                  .read<AcademicRepository>()
+                  .getAllGradingScales()
+                  .map(
+                    (s) => DropdownMenuItem<int>(
+                      value: s.id,
+                      child: Text('${s.name}${s.isDefault ? ' (Bawaan)' : ''}'),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (val) {
+                if (val != null) {
+                  setState(() => _gradingScaleId = val);
+                }
               },
             ),
             const SizedBox(height: AppSpacing.md),

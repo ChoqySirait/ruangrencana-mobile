@@ -3,6 +3,8 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../core/widgets/app_shell_scaffold.dart';
 import '../../features/academic/grades/presentation/views/academic_view.dart';
+import '../../features/academic/scales/presentation/views/grading_scale_form_view.dart';
+import '../../features/academic/scales/presentation/views/grading_scale_list_view.dart';
 import '../../features/academic/simulator/presentation/views/grade_simulator_view.dart';
 import '../../features/academic/terms/presentation/views/semester_form_view.dart';
 import '../../features/academic/terms/presentation/views/semester_list_view.dart';
@@ -38,6 +40,11 @@ abstract final class AppRoutes {
   static const String addTask = 'add-task';
   static const String editTask = 'edit-task';
   static const String gradeSimulation = 'grade-simulation';
+
+  // Rute sekunder Skala Penilaian
+  static const String gradingScaleList = 'grading-scale-list';
+  static const String addGradingScale = 'add-grading-scale';
+  static const String editGradingScale = 'edit-grading-scale';
 }
 
 /// Konfigurasi GoRouter untuk RuangRencana menggunakan [StatefulShellRoute]
@@ -175,6 +182,27 @@ abstract final class AppRouter {
           path: '/akademik/simulasi-nilai',
           name: AppRoutes.gradeSimulation,
           builder: (context, state) => const GradeSimulatorView(),
+        ),
+        GoRoute(
+          parentNavigatorKey: rootNavigatorKey,
+          path: '/akademik/skala-nilai',
+          name: AppRoutes.gradingScaleList,
+          builder: (context, state) => const GradingScaleListView(),
+        ),
+        GoRoute(
+          parentNavigatorKey: rootNavigatorKey,
+          path: '/akademik/skala-nilai/tambah',
+          name: AppRoutes.addGradingScale,
+          builder: (context, state) => const GradingScaleFormView(),
+        ),
+        GoRoute(
+          parentNavigatorKey: rootNavigatorKey,
+          path: '/akademik/skala-nilai/:scaleId/edit',
+          name: AppRoutes.editGradingScale,
+          builder: (context, state) {
+            final scaleId = state.pathParameters['scaleId'] ?? '';
+            return GradingScaleFormView(scaleId: scaleId);
+          },
         ),
       ],
     );

@@ -30,6 +30,11 @@ class AcademicView extends StatelessWidget {
         title: const Text('Performa Akademik'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.tune_outlined),
+            tooltip: 'Skala Penilaian',
+            onPressed: () => context.pushNamed(AppRoutes.gradingScaleList),
+          ),
+          IconButton(
             icon: const Icon(Icons.calendar_month_outlined),
             tooltip: 'Kelola Semester',
             onPressed: () => context.pushNamed(AppRoutes.semesterList),
@@ -137,6 +142,65 @@ class AcademicView extends StatelessWidget {
                       Icons.arrow_forward_ios_rounded,
                       size: 16,
                       color: AppColors.textOnPrimary,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.sm),
+
+          // Info Skala Penilaian Aktif
+          Card(
+            color: AppColors.surfaceSubtle,
+            child: InkWell(
+              onTap: () => context.pushNamed(AppRoutes.gradingScaleList),
+              borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.sm,
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.tune_outlined,
+                      size: 20,
+                      color: AppColors.primaryNavy,
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Skala Penilaian Semester Aktif',
+                            style: AppTextStyles.labelSmall,
+                          ),
+                          Text(
+                            overview.gradingScaleName,
+                            style: AppTextStyles.titleSmall.copyWith(
+                              color: AppColors.primaryNavy,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Text(
+                      'Kelola',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primaryNavy,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      size: 12,
+                      color: AppColors.primaryNavy,
                     ),
                   ],
                 ),

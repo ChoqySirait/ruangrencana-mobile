@@ -2,6 +2,7 @@ import 'package:ruangrencana/core/database/app_database.dart';
 import 'package:ruangrencana/core/database/database_schema.dart';
 import 'package:ruangrencana/core/errors/app_failure.dart';
 import 'package:ruangrencana/core/utils/academic_calculator.dart';
+import 'package:ruangrencana/features/academic/scales/data/models/grading_scale_item.dart';
 import 'package:ruangrencana/features/academic/terms/data/models/academic_term_item.dart';
 import 'package:ruangrencana/features/courses/data/repositories/course_repository.dart';
 import 'package:sqflite/sqflite.dart';
@@ -42,10 +43,40 @@ abstract class AcademicRepository {
   Future<void> setActiveSemester(int id);
   Future<void> deleteSemester(int id);
 
-  // Operasi CRUD Skala Nilai
+  // Operasi CRUD Profil Skala Nilai
+  List<GradingScaleItem> getAllGradingScales();
+  GradingScaleItem? getGradingScaleById(int id);
+  GradingScaleItem? getDefaultGradingScale();
+  Future<List<AcademicTermItem>> getTermsUsingScale(int scaleId);
+
   Future<int> createGradingScale({
     required String name,
     bool isDefault = false,
+    List<GradeScaleRule>? initialRanges,
+  });
+
+  Future<void> updateGradingScale({
+    required int id,
+    required String name,
+    bool isDefault = false,
+    List<GradeScaleRule>? ranges,
+  });
+
+  Future<void> setDefaultGradingScale(int id);
+  Future<void> deleteGradingScale(int id);
+  Future<int> duplicateGradingScale({
+    required int sourceScaleId,
+    required String newName,
+  });
+
+  Future<void> assignGradingScaleToSemester({
+    required int termId,
+    required int scaleId,
+  });
+
+  Future<void> setGradingScaleRanges({
+    required int scaleId,
+    required List<GradeScaleRule> rules,
   });
 
   Future<int> addGradingScaleRange({
@@ -71,6 +102,7 @@ class SqliteAcademicRepository implements AcademicRepository {
 
   final List<GradeScaleRule> _activeScaleRules = [];
   final List<AcademicTermItem> _cachedSemesters = [];
+  final List<GradingScaleItem> _cachedScales = [];
   String _activeScaleName = 'Contoh Skala 4.00 (Dapat Dikonfigurasi)';
   String _activeSemesterLabel = 'Semester 4 • Genap 2025/2026';
   final List<SemesterGpaRecord> _historicalSemesters = [];
@@ -94,6 +126,33 @@ class SqliteAcademicRepository implements AcademicRepository {
       if (term.id == id) return term;
     }
     return null;
+  }
+
+  @override
+  List<GradingScaleItem> getAllGradingScales() =>
+      List.unmodifiable(_cachedScales);
+
+  @override
+  GradingScaleItem? getGradingScaleById(int id) {
+    for (final s in _cachedScales) {
+      if (s.id == id) return s;
+    }
+    return null;
+  }
+
+  @override
+  GradingScaleItem? getDefaultGradingScale() {
+    for (final s in _cachedScales) {
+      if (s.isDefault) return s;
+    }
+    return _cachedScales.firstOrNull;
+  }
+
+  @override
+  Future<List<AcademicTermItem>> getTermsUsingScale(int scaleId) async {
+    return _cachedSemesters
+        .where((t) => t.gradingScaleId == scaleId)
+        .toList(growable: false);
   }
 
   @override
@@ -138,7 +197,59 @@ class SqliteAcademicRepository implements AcademicRepository {
         }),
       );
 
-    // 2. Ambil semester aktif
+    // 2. Ambil master seluruh skala nilai dan rentang nilainya
+    final List<GradingScaleItem> loadedScales = [];
+    final scaleRows = await db.query(
+      DatabaseSchema.tableGradingScales,
+      orderBy: 'is_default DESC, scale_name ASC',
+    );
+
+    for (final sRow in scaleRows) {
+      final sId = sRow['id'] as int;
+      final rangeRows = await db.query(
+        DatabaseSchema.tableGradingScaleRanges,
+        where: 'grading_scale_id = ?',
+        whereArgs: [sId],
+        orderBy: 'minimum_score DESC',
+      );
+
+      final ranges = rangeRows
+          .map((r) {
+            return GradingScaleRangeItem(
+              id: r['id'] as int,
+              gradingScaleId: r['grading_scale_id'] as int,
+              minimumScore: (r['minimum_score'] as num).toDouble(),
+              maximumScore: (r['maximum_score'] as num).toDouble(),
+              letterGrade: r['letter_grade'] as String,
+              gradePoint: (r['grade_point'] as num).toDouble(),
+            );
+          })
+          .toList(growable: false);
+
+      final countRow = await db.rawQuery(
+        'SELECT COUNT(*) as count FROM ${DatabaseSchema.tableAcademicTerms} WHERE grading_scale_id = ?',
+        [sId],
+      );
+      final usage = (countRow.first['count'] as int?) ?? 0;
+
+      loadedScales.add(
+        GradingScaleItem(
+          id: sId,
+          name: sRow['scale_name'] as String,
+          isDefault: (sRow['is_default'] as int) == 1,
+          ranges: ranges,
+          usageCount: usage,
+          createdAt: DateTime.parse(sRow['created_at'] as String),
+          updatedAt: DateTime.parse(sRow['updated_at'] as String),
+        ),
+      );
+    }
+
+    _cachedScales
+      ..clear()
+      ..addAll(loadedScales);
+
+    // 3. Tentukan skala aktif berdasarkan semester aktif atau skala default
     final activeTerm = getActiveSemester();
     int scaleId = 1;
     if (activeTerm != null) {
@@ -149,40 +260,18 @@ class SqliteAcademicRepository implements AcademicRepository {
       scaleId = _cachedSemesters.last.gradingScaleId;
     } else {
       _activeSemesterLabel = 'Belum ada semester';
+      final defScale = getDefaultGradingScale();
+      if (defScale != null) scaleId = defScale.id;
     }
 
-    // 3. Ambil master skala nilai
-    final scaleRows = await db.query(
-      DatabaseSchema.tableGradingScales,
-      where: 'id = ?',
-      whereArgs: [scaleId],
-      limit: 1,
-    );
-
-    if (scaleRows.isNotEmpty) {
-      _activeScaleName = scaleRows.first['scale_name'] as String;
+    final activeScaleItem =
+        getGradingScaleById(scaleId) ?? getDefaultGradingScale();
+    if (activeScaleItem != null) {
+      _activeScaleName = activeScaleItem.name;
+      _activeScaleRules
+        ..clear()
+        ..addAll(activeScaleItem.rules);
     }
-
-    // 4. Ambil rentang nilai (rules)
-    final rangeRows = await db.query(
-      DatabaseSchema.tableGradingScaleRanges,
-      where: 'grading_scale_id = ?',
-      whereArgs: [scaleId],
-      orderBy: 'minimum_score DESC',
-    );
-
-    _activeScaleRules
-      ..clear()
-      ..addAll(
-        rangeRows.map((r) {
-          return GradeScaleRule(
-            minScore: (r['minimum_score'] as num).toDouble(),
-            maxScore: (r['maximum_score'] as num).toDouble(),
-            letter: r['letter_grade'] as String,
-            gradePoint: (r['grade_point'] as num).toDouble(),
-          );
-        }),
-      );
 
     // 5. Target SKS kelulusan dari preferensi aplikasi murni
     final prefRows = await db.query(DatabaseSchema.tableAppPreferences);
@@ -594,19 +683,275 @@ class SqliteAcademicRepository implements AcademicRepository {
   Future<int> createGradingScale({
     required String name,
     bool isDefault = false,
+    List<GradeScaleRule>? initialRanges,
   }) async {
+    if (name.trim().isEmpty) {
+      throw AppFailure(
+        'Nama profil skala nilai tidak boleh kosong.',
+        code: 'INVALID_SCALE_NAME',
+      );
+    }
+
+    if (initialRanges != null && initialRanges.isNotEmpty) {
+      final valResult = AcademicCalculator.validateGradingScale(initialRanges);
+      if (!valResult.isValid) {
+        throw AppFailure(valResult.errors.first, code: 'INVALID_GRADING_SCALE');
+      }
+    }
+
     final db = await appDatabase.database;
     final now = DateTime.now().toUtc().toIso8601String();
 
-    final id = await db.insert(DatabaseSchema.tableGradingScales, {
-      'scale_name': name.trim(),
-      'is_default': isDefault ? 1 : 0,
-      'created_at': now,
-      'updated_at': now,
+    final newId = await db.transaction<int>((txn) async {
+      if (isDefault) {
+        await txn.update(DatabaseSchema.tableGradingScales, {
+          'is_default': 0,
+          'updated_at': now,
+        });
+      }
+
+      final id = await txn.insert(DatabaseSchema.tableGradingScales, {
+        'scale_name': name.trim(),
+        'is_default': isDefault ? 1 : 0,
+        'created_at': now,
+        'updated_at': now,
+      });
+
+      if (initialRanges != null) {
+        for (final r in initialRanges) {
+          await txn.insert(DatabaseSchema.tableGradingScaleRanges, {
+            'grading_scale_id': id,
+            'minimum_score': r.minScore,
+            'maximum_score': r.maxScore,
+            'letter_grade': r.letter.trim(),
+            'grade_point': r.gradePoint,
+          });
+        }
+      }
+
+      return id;
     });
 
     await load();
-    return id;
+    return newId;
+  }
+
+  @override
+  Future<void> updateGradingScale({
+    required int id,
+    required String name,
+    bool isDefault = false,
+    List<GradeScaleRule>? ranges,
+  }) async {
+    if (name.trim().isEmpty) {
+      throw AppFailure(
+        'Nama profil skala nilai tidak boleh kosong.',
+        code: 'INVALID_SCALE_NAME',
+      );
+    }
+
+    if (ranges != null) {
+      final valResult = AcademicCalculator.validateGradingScale(ranges);
+      if (!valResult.isValid) {
+        throw AppFailure(valResult.errors.first, code: 'INVALID_GRADING_SCALE');
+      }
+    }
+
+    final db = await appDatabase.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    await db.transaction((txn) async {
+      if (isDefault) {
+        await txn.update(DatabaseSchema.tableGradingScales, {
+          'is_default': 0,
+          'updated_at': now,
+        });
+      }
+
+      await txn.update(
+        DatabaseSchema.tableGradingScales,
+        {
+          'scale_name': name.trim(),
+          'is_default': isDefault ? 1 : 0,
+          'updated_at': now,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+
+      if (ranges != null) {
+        await txn.delete(
+          DatabaseSchema.tableGradingScaleRanges,
+          where: 'grading_scale_id = ?',
+          whereArgs: [id],
+        );
+
+        for (final r in ranges) {
+          await txn.insert(DatabaseSchema.tableGradingScaleRanges, {
+            'grading_scale_id': id,
+            'minimum_score': r.minScore,
+            'maximum_score': r.maxScore,
+            'letter_grade': r.letter.trim(),
+            'grade_point': r.gradePoint,
+          });
+        }
+      }
+    });
+
+    await load();
+  }
+
+  @override
+  Future<void> setDefaultGradingScale(int id) async {
+    final scale = getGradingScaleById(id);
+    if (scale == null) {
+      throw AppFailure('Skala nilai tidak ditemukan.', code: 'SCALE_NOT_FOUND');
+    }
+
+    final db = await appDatabase.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    await db.transaction((txn) async {
+      await txn.update(DatabaseSchema.tableGradingScales, {
+        'is_default': 0,
+        'updated_at': now,
+      });
+      await txn.update(
+        DatabaseSchema.tableGradingScales,
+        {'is_default': 1, 'updated_at': now},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    });
+
+    await load();
+  }
+
+  @override
+  Future<void> deleteGradingScale(int id) async {
+    final scale = getGradingScaleById(id);
+    if (scale == null) {
+      throw AppFailure('Skala nilai tidak ditemukan.', code: 'SCALE_NOT_FOUND');
+    }
+
+    if (scale.isDefault) {
+      throw AppFailure(
+        'Skala nilai bawaan (default) tidak dapat dihapus. Silakan tentukan skala lain sebagai default terlebih dahulu.',
+        code: 'CANNOT_DELETE_DEFAULT',
+      );
+    }
+
+    final db = await appDatabase.database;
+    final countRow = await db.rawQuery(
+      'SELECT COUNT(*) as count FROM ${DatabaseSchema.tableAcademicTerms} WHERE grading_scale_id = ?',
+      [id],
+    );
+    final count = (countRow.first['count'] as int?) ?? 0;
+    if (count > 0) {
+      throw AppFailure(
+        'Skala nilai ini sedang digunakan oleh $count semester akademik dan tidak dapat dihapus.',
+        code: 'SCALE_IN_USE',
+      );
+    }
+
+    await db.delete(
+      DatabaseSchema.tableGradingScales,
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+
+    await load();
+  }
+
+  @override
+  Future<int> duplicateGradingScale({
+    required int sourceScaleId,
+    required String newName,
+  }) async {
+    final source = getGradingScaleById(sourceScaleId);
+    if (source == null) {
+      throw AppFailure(
+        'Skala sumber tidak ditemukan.',
+        code: 'SCALE_NOT_FOUND',
+      );
+    }
+
+    return createGradingScale(
+      name: newName,
+      isDefault: false,
+      initialRanges: source.rules,
+    );
+  }
+
+  @override
+  Future<void> assignGradingScaleToSemester({
+    required int termId,
+    required int scaleId,
+  }) async {
+    final scale = getGradingScaleById(scaleId);
+    if (scale == null) {
+      throw AppFailure('Skala nilai tidak ditemukan.', code: 'SCALE_NOT_FOUND');
+    }
+
+    final db = await appDatabase.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    final affected = await db.update(
+      DatabaseSchema.tableAcademicTerms,
+      {'grading_scale_id': scaleId, 'updated_at': now},
+      where: 'id = ?',
+      whereArgs: [termId],
+    );
+
+    if (affected == 0) {
+      throw AppFailure(
+        'Semester akademik tidak ditemukan.',
+        code: 'SEMESTER_NOT_FOUND',
+      );
+    }
+
+    await load();
+  }
+
+  @override
+  Future<void> setGradingScaleRanges({
+    required int scaleId,
+    required List<GradeScaleRule> rules,
+  }) async {
+    final valResult = AcademicCalculator.validateGradingScale(rules);
+    if (!valResult.isValid) {
+      throw AppFailure(valResult.errors.first, code: 'INVALID_GRADING_SCALE');
+    }
+
+    final db = await appDatabase.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    await db.transaction((txn) async {
+      await txn.delete(
+        DatabaseSchema.tableGradingScaleRanges,
+        where: 'grading_scale_id = ?',
+        whereArgs: [scaleId],
+      );
+
+      for (final r in rules) {
+        await txn.insert(DatabaseSchema.tableGradingScaleRanges, {
+          'grading_scale_id': scaleId,
+          'minimum_score': r.minScore,
+          'maximum_score': r.maxScore,
+          'letter_grade': r.letter.trim(),
+          'grade_point': r.gradePoint,
+        });
+      }
+
+      await txn.update(
+        DatabaseSchema.tableGradingScales,
+        {'updated_at': now},
+        where: 'id = ?',
+        whereArgs: [scaleId],
+      );
+    });
+
+    await load();
   }
 
   @override
@@ -646,10 +991,96 @@ class SqliteAcademicRepository implements AcademicRepository {
 
 /// Implementasi in-memory untuk fallback atau testing terisolasi.
 class InMemoryAcademicRepository implements AcademicRepository {
-  InMemoryAcademicRepository({required this.courseRepository});
+  InMemoryAcademicRepository({required this.courseRepository}) {
+    _scales.add(
+      GradingScaleItem(
+        id: 1,
+        name: 'Standar 4.00 (Umum)',
+        isDefault: true,
+        usageCount: 0,
+        createdAt: DateTime(2025, 1, 1),
+        updatedAt: DateTime(2025, 1, 1),
+        ranges: [
+          const GradingScaleRangeItem(
+            id: 1,
+            gradingScaleId: 1,
+            minimumScore: 85,
+            maximumScore: 100,
+            letterGrade: 'A',
+            gradePoint: 4.00,
+          ),
+          const GradingScaleRangeItem(
+            id: 2,
+            gradingScaleId: 1,
+            minimumScore: 80,
+            maximumScore: 84.99,
+            letterGrade: 'A-',
+            gradePoint: 3.70,
+          ),
+          const GradingScaleRangeItem(
+            id: 3,
+            gradingScaleId: 1,
+            minimumScore: 75,
+            maximumScore: 79.99,
+            letterGrade: 'B+',
+            gradePoint: 3.30,
+          ),
+          const GradingScaleRangeItem(
+            id: 4,
+            gradingScaleId: 1,
+            minimumScore: 70,
+            maximumScore: 74.99,
+            letterGrade: 'B',
+            gradePoint: 3.00,
+          ),
+          const GradingScaleRangeItem(
+            id: 5,
+            gradingScaleId: 1,
+            minimumScore: 65,
+            maximumScore: 69.99,
+            letterGrade: 'B-',
+            gradePoint: 2.70,
+          ),
+          const GradingScaleRangeItem(
+            id: 6,
+            gradingScaleId: 1,
+            minimumScore: 60,
+            maximumScore: 64.99,
+            letterGrade: 'C+',
+            gradePoint: 2.30,
+          ),
+          const GradingScaleRangeItem(
+            id: 7,
+            gradingScaleId: 1,
+            minimumScore: 55,
+            maximumScore: 59.99,
+            letterGrade: 'C',
+            gradePoint: 2.00,
+          ),
+          const GradingScaleRangeItem(
+            id: 8,
+            gradingScaleId: 1,
+            minimumScore: 45,
+            maximumScore: 54.99,
+            letterGrade: 'D',
+            gradePoint: 1.00,
+          ),
+          const GradingScaleRangeItem(
+            id: 9,
+            gradingScaleId: 1,
+            minimumScore: 0,
+            maximumScore: 44.99,
+            letterGrade: 'E',
+            gradePoint: 0.00,
+          ),
+        ],
+      ),
+    );
+  }
 
   final CourseRepository courseRepository;
   final List<AcademicTermItem> _semesters = [];
+  final List<GradingScaleItem> _scales = [];
 
   static const List<GradeScaleRule> sampleScale = [
     GradeScaleRule(minScore: 85, maxScore: 100, letter: 'A', gradePoint: 4.00),
@@ -853,10 +1284,233 @@ class InMemoryAcademicRepository implements AcademicRepository {
   Future<void> load() async {}
 
   @override
+  List<GradingScaleItem> getAllGradingScales() => List.unmodifiable(_scales);
+
+  @override
+  GradingScaleItem? getGradingScaleById(int id) {
+    for (final scale in _scales) {
+      if (scale.id == id) return scale;
+    }
+    return null;
+  }
+
+  @override
+  GradingScaleItem? getDefaultGradingScale() {
+    for (final scale in _scales) {
+      if (scale.isDefault) return scale;
+    }
+    return _scales.isNotEmpty ? _scales.first : null;
+  }
+
+  @override
+  Future<List<AcademicTermItem>> getTermsUsingScale(int scaleId) async {
+    return _semesters.where((s) => s.gradingScaleId == scaleId).toList();
+  }
+
+  @override
   Future<int> createGradingScale({
     required String name,
     bool isDefault = false,
-  }) async => 1;
+    List<GradeScaleRule>? initialRanges,
+  }) async {
+    if (name.trim().isEmpty) {
+      throw AppFailure(
+        'Nama skala penilaian tidak boleh kosong.',
+        code: 'INVALID_SCALE_NAME',
+      );
+    }
+
+    if (isDefault) {
+      for (var i = 0; i < _scales.length; i++) {
+        _scales[i] = _scales[i].copyWith(isDefault: false);
+      }
+    }
+
+    final newId = _scales.length + 1;
+    final now = DateTime.now();
+    final ranges = <GradingScaleRangeItem>[];
+    if (initialRanges != null) {
+      for (var i = 0; i < initialRanges.length; i++) {
+        final r = initialRanges[i];
+        ranges.add(
+          GradingScaleRangeItem(
+            id: i + 1,
+            gradingScaleId: newId,
+            minimumScore: r.minScore,
+            maximumScore: r.maxScore,
+            letterGrade: r.letter,
+            gradePoint: r.gradePoint,
+          ),
+        );
+      }
+    }
+
+    _scales.add(
+      GradingScaleItem(
+        id: newId,
+        name: name.trim(),
+        isDefault: isDefault || _scales.isEmpty,
+        ranges: ranges,
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+
+    return newId;
+  }
+
+  @override
+  Future<void> updateGradingScale({
+    required int id,
+    required String name,
+    bool isDefault = false,
+    List<GradeScaleRule>? ranges,
+  }) async {
+    if (name.trim().isEmpty) {
+      throw AppFailure(
+        'Nama skala penilaian tidak boleh kosong.',
+        code: 'INVALID_SCALE_NAME',
+      );
+    }
+
+    final index = _scales.indexWhere((s) => s.id == id);
+    if (index == -1) {
+      throw AppFailure('Skala nilai tidak ditemukan.', code: 'SCALE_NOT_FOUND');
+    }
+
+    if (isDefault) {
+      for (var i = 0; i < _scales.length; i++) {
+        _scales[i] = _scales[i].copyWith(isDefault: false);
+      }
+    }
+
+    var updatedRanges = _scales[index].ranges;
+    if (ranges != null) {
+      final val = AcademicCalculator.validateGradingScale(ranges);
+      if (!val.isValid) {
+        throw AppFailure(val.errors.first, code: 'INVALID_GRADING_SCALE');
+      }
+      updatedRanges = [
+        for (var i = 0; i < ranges.length; i++)
+          GradingScaleRangeItem(
+            id: i + 1,
+            gradingScaleId: id,
+            minimumScore: ranges[i].minScore,
+            maximumScore: ranges[i].maxScore,
+            letterGrade: ranges[i].letter,
+            gradePoint: ranges[i].gradePoint,
+          ),
+      ];
+    }
+
+    _scales[index] = _scales[index].copyWith(
+      name: name.trim(),
+      isDefault: isDefault,
+      ranges: updatedRanges,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  @override
+  Future<void> setDefaultGradingScale(int id) async {
+    final scale = getGradingScaleById(id);
+    if (scale == null) {
+      throw AppFailure('Skala nilai tidak ditemukan.', code: 'SCALE_NOT_FOUND');
+    }
+    for (var i = 0; i < _scales.length; i++) {
+      _scales[i] = _scales[i].copyWith(isDefault: _scales[i].id == id);
+    }
+  }
+
+  @override
+  Future<void> deleteGradingScale(int id) async {
+    final scale = getGradingScaleById(id);
+    if (scale == null) {
+      throw AppFailure('Skala nilai tidak ditemukan.', code: 'SCALE_NOT_FOUND');
+    }
+    if (scale.isDefault) {
+      throw AppFailure(
+        'Skala nilai bawaan (default) tidak dapat dihapus.',
+        code: 'CANNOT_DELETE_DEFAULT',
+      );
+    }
+    final inUse = _semesters.any((s) => s.gradingScaleId == id);
+    if (inUse) {
+      throw AppFailure(
+        'Skala nilai ini sedang digunakan oleh semester akademik dan tidak dapat dihapus.',
+        code: 'SCALE_IN_USE',
+      );
+    }
+    _scales.removeWhere((s) => s.id == id);
+  }
+
+  @override
+  Future<int> duplicateGradingScale({
+    required int sourceScaleId,
+    required String newName,
+  }) async {
+    final source = getGradingScaleById(sourceScaleId);
+    if (source == null) {
+      throw AppFailure(
+        'Skala sumber tidak ditemukan.',
+        code: 'SCALE_NOT_FOUND',
+      );
+    }
+    return createGradingScale(
+      name: newName,
+      isDefault: false,
+      initialRanges: source.rules,
+    );
+  }
+
+  @override
+  Future<void> assignGradingScaleToSemester({
+    required int termId,
+    required int scaleId,
+  }) async {
+    final scale = getGradingScaleById(scaleId);
+    if (scale == null) {
+      throw AppFailure('Skala nilai tidak ditemukan.', code: 'SCALE_NOT_FOUND');
+    }
+    final index = _semesters.indexWhere((s) => s.id == termId);
+    if (index == -1) {
+      throw AppFailure('Semester tidak ditemukan.', code: 'SEMESTER_NOT_FOUND');
+    }
+    _semesters[index] = _semesters[index].copyWith(
+      gradingScaleId: scaleId,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  @override
+  Future<void> setGradingScaleRanges({
+    required int scaleId,
+    required List<GradeScaleRule> rules,
+  }) async {
+    final val = AcademicCalculator.validateGradingScale(rules);
+    if (!val.isValid) {
+      throw AppFailure(val.errors.first, code: 'INVALID_GRADING_SCALE');
+    }
+    final index = _scales.indexWhere((s) => s.id == scaleId);
+    if (index == -1) {
+      throw AppFailure('Skala nilai tidak ditemukan.', code: 'SCALE_NOT_FOUND');
+    }
+    final ranges = [
+      for (var i = 0; i < rules.length; i++)
+        GradingScaleRangeItem(
+          id: i + 1,
+          gradingScaleId: scaleId,
+          minimumScore: rules[i].minScore,
+          maximumScore: rules[i].maxScore,
+          letterGrade: rules[i].letter,
+          gradePoint: rules[i].gradePoint,
+        ),
+    ];
+    _scales[index] = _scales[index].copyWith(
+      ranges: ranges,
+      updatedAt: DateTime.now(),
+    );
+  }
 
   @override
   Future<int> addGradingScaleRange({
@@ -865,8 +1519,33 @@ class InMemoryAcademicRepository implements AcademicRepository {
     required double maxScore,
     required String letter,
     required double gradePoint,
-  }) async => 1;
+  }) async {
+    final index = _scales.indexWhere((s) => s.id == scaleId);
+    if (index == -1) {
+      throw AppFailure('Skala nilai tidak ditemukan.', code: 'SCALE_NOT_FOUND');
+    }
+    final existing = List<GradingScaleRangeItem>.from(_scales[index].ranges);
+    final newRange = GradingScaleRangeItem(
+      id: existing.length + 1,
+      gradingScaleId: scaleId,
+      minimumScore: minScore,
+      maximumScore: maxScore,
+      letterGrade: letter.trim(),
+      gradePoint: gradePoint,
+    );
+    existing.add(newRange);
+    _scales[index] = _scales[index].copyWith(
+      ranges: existing,
+      updatedAt: DateTime.now(),
+    );
+    return newRange.id;
+  }
 
   @override
-  Future<void> deleteGradingScaleRange(int rangeId) async {}
+  Future<void> deleteGradingScaleRange(int rangeId) async {
+    for (var i = 0; i < _scales.length; i++) {
+      final ranges = _scales[i].ranges.where((r) => r.id != rangeId).toList();
+      _scales[i] = _scales[i].copyWith(ranges: ranges);
+    }
+  }
 }
