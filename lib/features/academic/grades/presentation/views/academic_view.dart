@@ -22,8 +22,6 @@ class AcademicView extends StatelessWidget {
   Widget build(BuildContext context) {
     final vm = context.watch<AcademicViewModel>();
     final overview = vm.overview;
-    final totalWithActiveSks =
-        overview.completedSksBeforeActive + overview.activeSks;
 
     return Scaffold(
       appBar: AppBar(
@@ -73,7 +71,8 @@ class AcademicView extends StatelessWidget {
                 child: MetricSummaryCard(
                   label: 'IPS Sementara',
                   value: overview.provisionalIps.toStringAsFixed(2),
-                  subtitle: '${overview.activeSks} SKS aktif',
+                  subtitle:
+                      '${overview.activeSks} SKS • ${overview.finalizedCourseCount}/${overview.courseGrades.length} final',
                   accentColor: AppColors.primaryNavy,
                 ),
               ),
@@ -82,7 +81,7 @@ class AcademicView extends StatelessWidget {
                 child: MetricSummaryCard(
                   label: 'IPK Kumulatif',
                   value: overview.cumulativeIpk.toStringAsFixed(2),
-                  subtitle: '${overview.completedSksBeforeActive} SKS selesai',
+                  subtitle: '${overview.totalPassedSks} SKS lulus',
                   accentColor: AppColors.secondaryTeal,
                 ),
               ),
@@ -228,7 +227,7 @@ class AcademicView extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        '$totalWithActiveSks / ${overview.targetGraduationSks} SKS',
+                        '${overview.totalPassedSks} / ${overview.targetGraduationSks} SKS',
                         style: AppTextStyles.labelLarge.copyWith(
                           color: AppColors.primaryNavy,
                         ),
@@ -247,7 +246,7 @@ class AcademicView extends StatelessWidget {
                   ),
                   const SizedBox(height: AppSpacing.xs),
                   Text(
-                    '${overview.completedSksBeforeActive} SKS lulus + ${overview.activeSks} SKS sedang ditempuh',
+                    '${overview.completedSksBeforeActive} SKS lulus lampau + ${overview.activePassedSks} SKS lulus aktif (${overview.totalEnrolledSks} SKS total ditempuh)',
                     style: AppTextStyles.bodySmall,
                   ),
                   const SizedBox(height: AppSpacing.md),
@@ -267,40 +266,9 @@ class AcademicView extends StatelessWidget {
                       ),
                     )
                   else
-                    Row(
+                    Column(
                       children: overview.historicalSemesters.map((record) {
-                        return Expanded(
-                          child: Container(
-                            margin: const EdgeInsets.only(right: AppSpacing.xs),
-                            padding: const EdgeInsets.all(AppSpacing.sm),
-                            decoration: BoxDecoration(
-                              color: AppColors.surfaceSubtle,
-                              borderRadius: BorderRadius.circular(
-                                AppSpacing.radiusMd,
-                              ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  record.semesterLabel,
-                                  style: AppTextStyles.labelSmall,
-                                ),
-                                const SizedBox(height: AppSpacing.xxs),
-                                Text(
-                                  record.ips.toStringAsFixed(2),
-                                  style: AppTextStyles.titleMedium.copyWith(
-                                    color: AppColors.primaryNavy,
-                                  ),
-                                ),
-                                Text(
-                                  '${record.sks} SKS',
-                                  style: AppTextStyles.bodySmall,
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
+                        return _HistoricalSemesterTile(record: record);
                       }).toList(),
                     ),
                 ],
@@ -430,6 +398,116 @@ class _CourseGradeCard extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HistoricalSemesterTile extends StatelessWidget {
+  const _HistoricalSemesterTile({required this.record});
+
+  final SemesterGpaRecord record;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: AppColors.surfaceSubtle,
+      margin: const EdgeInsets.only(bottom: AppSpacing.xs),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        side: const BorderSide(color: AppColors.border),
+      ),
+      elevation: 0,
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  record.semesterLabel,
+                  style: AppTextStyles.labelLarge.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              InfoBadge(
+                label: 'IPS ${record.ips.toStringAsFixed(2)}',
+                tone: BadgeTone.primary,
+              ),
+            ],
+          ),
+          subtitle: Text(
+            '${record.sks} SKS total • ${record.effectivePassedSks} SKS lulus',
+            style: AppTextStyles.bodySmall,
+          ),
+          children: [
+            if (record.courses.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(AppSpacing.sm),
+                child: Text(
+                  'Tidak ada data rincian mata kuliah.',
+                  style: AppTextStyles.bodySmall,
+                ),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.sm,
+                  0,
+                  AppSpacing.sm,
+                  AppSpacing.sm,
+                ),
+                child: Column(
+                  children: record.courses.map((course) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          InfoBadge(
+                            label: course.courseCode,
+                            tone: BadgeTone.neutral,
+                          ),
+                          const SizedBox(width: AppSpacing.xs),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  course.courseName,
+                                  style: AppTextStyles.bodyMedium.copyWith(
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  '${course.sks} SKS • Skor ${course.score != null ? course.score!.toStringAsFixed(1) : '-'}',
+                                  style: AppTextStyles.bodySmall,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.xs),
+                          Text(
+                            course.letterGrade,
+                            style: AppTextStyles.titleMedium.copyWith(
+                              color: course.isPassed
+                                  ? AppColors.primaryNavy
+                                  : AppColors.error,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+          ],
         ),
       ),
     );

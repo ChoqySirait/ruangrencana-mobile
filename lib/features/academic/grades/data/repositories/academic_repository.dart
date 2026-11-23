@@ -328,10 +328,14 @@ class SqliteAcademicRepository implements AcademicRepository {
       if (termCourses.isEmpty) continue;
 
       var termTotalSks = 0;
+      var termPassedSks = 0;
       final termWeightedPoints = <WeightedGradePoint>[];
+      final historicalCourseRecords = <HistoricalCourseGradeRecord>[];
 
       for (final cRow in termCourses) {
         final cId = cRow['id'] as int;
+        final cCode = cRow['course_code'] as String;
+        final cName = cRow['course_name'] as String;
         final sks = cRow['credits'] as int;
         termTotalSks += sks;
 
@@ -359,17 +363,34 @@ class SqliteAcademicRepository implements AcademicRepository {
             .toList(growable: false);
 
         final calc = AcademicCalculator.calculateCourseGrade(components);
-        if (calc.provisionalAverage != null) {
-          final rule = AcademicCalculator.resolveGradeRule(
-            calc.provisionalAverage!,
-            termRules,
+        final score = calc.provisionalAverage;
+        final rule = score != null
+            ? AcademicCalculator.resolveGradeRule(score, termRules)
+            : null;
+        final letter = rule?.letter ?? '-';
+        final gradePoint = rule?.gradePoint ?? 0.0;
+
+        if (score != null && rule != null) {
+          termWeightedPoints.add(
+            WeightedGradePoint(sks: sks, gradePoint: gradePoint),
           );
-          if (rule != null) {
-            termWeightedPoints.add(
-              WeightedGradePoint(sks: sks, gradePoint: rule.gradePoint),
-            );
+          if (gradePoint > 0.0) {
+            termPassedSks += sks;
           }
         }
+
+        historicalCourseRecords.add(
+          HistoricalCourseGradeRecord(
+            courseId: cId.toString(),
+            courseCode: cCode,
+            courseName: cName,
+            sks: sks,
+            score: score,
+            letterGrade: letter,
+            gradePoint: gradePoint,
+            isFinalReady: calc.isFinalReady,
+          ),
+        );
       }
 
       final termIps = AcademicCalculator.calculateWeightedGpa(
@@ -379,7 +400,11 @@ class SqliteAcademicRepository implements AcademicRepository {
         SemesterGpaRecord(
           semesterLabel: 'Sem $semNumber',
           sks: termTotalSks,
+          passedSks: termPassedSks,
           ips: termIps,
+          termId: termId,
+          academicYear: term.academicYear,
+          courses: historicalCourseRecords,
         ),
       );
     }
@@ -389,8 +414,10 @@ class SqliteAcademicRepository implements AcademicRepository {
   AcademicOverview getAcademicOverview() {
     final activeCourses = courseRepository.getActiveCourses();
     final courseSummaries = <CourseGradeSummary>[];
-    final weightedCurrentPoints = <WeightedGradePoint>[];
+    final weightedProvisionalPoints = <WeightedGradePoint>[];
+    final weightedOfficialPoints = <WeightedGradePoint>[];
     var activeSks = 0;
+    var activePassedSks = 0;
 
     for (final course in activeCourses) {
       activeSks += course.sks;
@@ -418,37 +445,59 @@ class SqliteAcademicRepository implements AcademicRepository {
       );
 
       if (calc.provisionalAverage != null) {
-        weightedCurrentPoints.add(
+        weightedProvisionalPoints.add(
           WeightedGradePoint(sks: course.sks, gradePoint: gradePoint),
         );
+      }
+
+      // Syarat Nilai Resmi: Total bobot 100% dan seluruh komponen wajib dinilai (isFinalReady == true)
+      if (calc.isFinalReady && calc.provisionalAverage != null) {
+        weightedOfficialPoints.add(
+          WeightedGradePoint(sks: course.sks, gradePoint: gradePoint),
+        );
+        if (gradePoint > 0.0) {
+          activePassedSks += course.sks;
+        }
       }
     }
 
     final provisionalIps = AcademicCalculator.calculateWeightedGpa(
-      weightedCurrentPoints,
+      weightedProvisionalPoints,
     );
 
-    final completedWeighted = _historicalSemesters
-        .map((sem) => WeightedGradePoint(sks: sem.sks, gradePoint: sem.ips))
-        .toList(growable: false);
+    final officialIps = AcademicCalculator.calculateWeightedGpa(
+      weightedOfficialPoints,
+    );
+
+    // Kumpulkan seluruh data bobot mutu dari semester lampau yang selesai
+    final allCumulativeWeighted = <WeightedGradePoint>[];
+    for (final sem in _historicalSemesters) {
+      allCumulativeWeighted.add(
+        WeightedGradePoint(sks: sem.sks, gradePoint: sem.ips),
+      );
+    }
+    // Ditambah dengan mata kuliah aktif yang SUDAH final secara resmi
+    allCumulativeWeighted.addAll(weightedOfficialPoints);
 
     final cumulativeIpk = AcademicCalculator.calculateWeightedGpa(
-      completedWeighted,
+      allCumulativeWeighted,
     );
 
-    final completedSks = _historicalSemesters.fold<int>(
+    final completedSksBeforeActive = _historicalSemesters.fold<int>(
       0,
-      (sum, sem) => sum + sem.sks,
+      (sum, sem) => sum + sem.effectivePassedSks,
     );
 
     return AcademicOverview(
       activeSemesterLabel: _activeSemesterLabel,
       activeSks: activeSks,
-      completedSksBeforeActive: completedSks,
+      completedSksBeforeActive: completedSksBeforeActive,
       targetGraduationSks: _targetGraduationSks,
       provisionalIps: provisionalIps,
+      officialIps: officialIps,
       cumulativeIpk: cumulativeIpk,
-      historicalSemesters: _historicalSemesters,
+      activePassedSks: activePassedSks,
+      historicalSemesters: List.unmodifiable(_historicalSemesters),
       courseGrades: courseSummaries,
       gradingScale: _activeScaleRules,
       gradingScaleName: _activeScaleName,
@@ -1272,7 +1321,9 @@ class InMemoryAcademicRepository implements AcademicRepository {
       completedSksBeforeActive: 60,
       targetGraduationSks: 144,
       provisionalIps: 3.65,
+      officialIps: 3.65,
       cumulativeIpk: 3.69,
+      activePassedSks: 20,
       historicalSemesters: [],
       courseGrades: [],
       gradingScale: sampleScale,
