@@ -8,12 +8,14 @@ import '../../features/academic/scales/presentation/views/grading_scale_list_vie
 import '../../features/academic/simulator/presentation/views/grade_simulator_view.dart';
 import '../../features/academic/terms/presentation/views/semester_form_view.dart';
 import '../../features/academic/terms/presentation/views/semester_list_view.dart';
+import '../../features/calendar/presentation/views/calendar_view.dart';
 import '../../features/courses/presentation/views/course_detail_view.dart';
 import '../../features/courses/presentation/views/course_form_view.dart';
 import '../../features/courses/presentation/views/courses_view.dart';
 import '../../features/dashboard/presentation/views/dashboard_view.dart';
 import '../../features/profile/presentation/views/profile_view.dart';
 import '../../features/schedule/presentation/views/schedule_view.dart';
+import '../../features/tasks/presentation/views/task_detail_view.dart';
 import '../../features/tasks/presentation/views/task_form_view.dart';
 import '../../features/tasks/presentation/views/tasks_view.dart';
 
@@ -36,9 +38,11 @@ abstract final class AppRoutes {
   static const String addSemester = 'add-semester';
   static const String editSemester = 'edit-semester';
 
-  // Rute sekunder Tugas & Simulasi
+  // Rute sekunder Tugas, Detail & Kalender
   static const String addTask = 'add-task';
   static const String editTask = 'edit-task';
+  static const String taskDetail = 'task-detail';
+  static const String calendar = 'calendar';
   static const String gradeSimulation = 'grade-simulation';
 
   // Rute sekunder Skala Penilaian
@@ -176,6 +180,21 @@ abstract final class AppRouter {
             final taskId = state.pathParameters['taskId'] ?? '';
             return TaskFormView(taskId: taskId);
           },
+        ),
+        GoRoute(
+          parentNavigatorKey: rootNavigatorKey,
+          path: '/tugas/:taskId',
+          name: AppRoutes.taskDetail,
+          builder: (context, state) {
+            final taskId = state.pathParameters['taskId'] ?? '';
+            return TaskDetailView(taskId: taskId);
+          },
+        ),
+        GoRoute(
+          parentNavigatorKey: rootNavigatorKey,
+          path: '/kalender',
+          name: AppRoutes.calendar,
+          builder: (context, state) => const CalendarView(),
         ),
         GoRoute(
           parentNavigatorKey: rootNavigatorKey,

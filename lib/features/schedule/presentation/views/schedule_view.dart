@@ -22,7 +22,16 @@ class ScheduleView extends StatelessWidget {
     final selectedDayName = DateFormatter.fullDayName(vm.selectedDayOfWeek);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Jadwal Kuliah')),
+      appBar: AppBar(
+        title: const Text('Jadwal Kuliah'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.calendar_month_rounded),
+            tooltip: 'Kalender Akademik',
+            onPressed: () => context.pushNamed(AppRoutes.calendar),
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.pageHorizontal,

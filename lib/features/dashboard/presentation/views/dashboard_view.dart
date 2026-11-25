@@ -214,7 +214,7 @@ class DashboardView extends StatelessWidget {
                     item: task,
                     onToggleComplete: () => tasksVm.toggleCompleted(task.id),
                     onTap: () => context.pushNamed(
-                      AppRoutes.editTask,
+                      AppRoutes.taskDetail,
                       pathParameters: {'taskId': task.id},
                     ),
                   ),

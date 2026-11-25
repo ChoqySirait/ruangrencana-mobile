@@ -11,7 +11,7 @@ import '../../../courses/data/repositories/course_repository.dart';
 import '../../data/models/assignment_item.dart';
 import '../view_models/tasks_view_model.dart';
 
-/// Layar sekunder untuk menambahkan tugas baru atau mengubah tugas yang ada.
+/// Layar untuk menambahkan tugas baru atau mengubah data tugas yang ada.
 class TaskFormView extends StatefulWidget {
   const TaskFormView({this.taskId, super.key});
 
@@ -85,8 +85,40 @@ class _TaskFormViewState extends State<TaskFormView> {
     });
   }
 
-  void _submit() {
+  Future<void> _pickDueTime() async {
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(
+        hour: _selectedDueDate.hour,
+        minute: _selectedDueDate.minute,
+      ),
+    );
+    if (pickedTime == null) return;
+    setState(() {
+      _selectedDueDate = DateTime(
+        _selectedDueDate.year,
+        _selectedDueDate.month,
+        _selectedDueDate.day,
+        pickedTime.hour,
+        pickedTime.minute,
+      );
+    });
+  }
+
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+
+    if (_courses.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Tidak dapat menyimpan tugas: Belum ada mata kuliah aktif.',
+          ),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
 
     final selectedCourse = _courses.firstWhere(
       (c) => c.id == _selectedCourseId,
@@ -95,37 +127,41 @@ class _TaskFormViewState extends State<TaskFormView> {
     final tasksVm = context.read<TasksViewModel>();
 
     if (_editingItem != null) {
-      tasksVm.saveEditedAssignment(
+      await tasksVm.saveEditedAssignment(
         _editingItem!.copyWith(
           title: _titleController.text.trim(),
           courseId: selectedCourse.id,
           courseName: selectedCourse.name,
+          courseCode: selectedCourse.code,
           dueDate: _selectedDueDate,
           priority: _selectedPriority,
           notes: _notesController.text.trim(),
         ),
       );
     } else {
-      tasksVm.saveNewAssignment(
-        title: _titleController.text,
+      await tasksVm.saveNewAssignment(
+        title: _titleController.text.trim(),
         courseId: selectedCourse.id,
         courseName: selectedCourse.name,
+        courseCode: selectedCourse.code,
         dueDate: _selectedDueDate,
         priority: _selectedPriority,
-        notes: _notesController.text,
+        notes: _notesController.text.trim(),
       );
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          widget.isEditMode
-              ? 'Perubahan tugas berhasil disimpan ke database.'
-              : 'Tugas baru berhasil disimpan ke database.',
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            widget.isEditMode
+                ? 'Perubahan tugas berhasil disimpan ke database.'
+                : 'Tugas baru berhasil disimpan ke database.',
+          ),
         ),
-      ),
-    );
-    context.pop();
+      );
+      context.pop();
+    }
   }
 
   Future<void> _confirmDelete() async {
@@ -197,6 +233,36 @@ class _TaskFormViewState extends State<TaskFormView> {
               child: ListView(
                 padding: const EdgeInsets.all(AppSpacing.pageHorizontal),
                 children: [
+                  if (_courses.isEmpty)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                      padding: const EdgeInsets.all(AppSpacing.sm),
+                      decoration: BoxDecoration(
+                        color: AppColors.error.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(
+                          AppSpacing.radiusMd,
+                        ),
+                        border: Border.all(
+                          color: AppColors.error.withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.warning_amber_rounded,
+                            color: AppColors.error,
+                          ),
+                          const SizedBox(width: AppSpacing.xs),
+                          const Expanded(
+                            child: Text(
+                              'Belum ada mata kuliah aktif di semester ini. Buat mata kuliah terlebih dahulu.',
+                              style: AppTextStyles.bodySmall,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
                   const Text('Judul Tugas', style: AppTextStyles.labelLarge),
                   const SizedBox(height: AppSpacing.xs),
                   TextFormField(
@@ -217,8 +283,13 @@ class _TaskFormViewState extends State<TaskFormView> {
                   const Text('Mata Kuliah', style: AppTextStyles.labelLarge),
                   const SizedBox(height: AppSpacing.xs),
                   DropdownButtonFormField<String>(
-                    initialValue: _selectedCourseId,
+                    initialValue: _selectedCourseId.isNotEmpty
+                        ? _selectedCourseId
+                        : null,
                     isExpanded: true,
+                    decoration: const InputDecoration(
+                      hintText: 'Pilih mata kuliah aktif',
+                    ),
                     items: _courses
                         .map(
                           (course) => DropdownMenuItem(
@@ -230,6 +301,12 @@ class _TaskFormViewState extends State<TaskFormView> {
                           ),
                         )
                         .toList(),
+                    validator: (val) {
+                      if (val == null || val.isEmpty) {
+                        return 'Pilih mata kuliah untuk tugas ini.';
+                      }
+                      return null;
+                    },
                     onChanged: (value) {
                       if (value != null) {
                         setState(() => _selectedCourseId = value);
@@ -240,23 +317,52 @@ class _TaskFormViewState extends State<TaskFormView> {
 
                   const Text('Tenggat Waktu', style: AppTextStyles.labelLarge),
                   const SizedBox(height: AppSpacing.xs),
-                  Card(
-                    child: ListTile(
-                      leading: const Icon(
-                        Icons.calendar_today_outlined,
-                        color: AppColors.primaryNavy,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Card(
+                          child: ListTile(
+                            dense: true,
+                            leading: const Icon(
+                              Icons.calendar_today_outlined,
+                              size: 20,
+                              color: AppColors.primaryNavy,
+                            ),
+                            title: const Text(
+                              'Tanggal',
+                              style: AppTextStyles.bodySmall,
+                            ),
+                            subtitle: Text(
+                              DateFormatter.shortDate(_selectedDueDate),
+                              style: AppTextStyles.labelMedium,
+                            ),
+                            onTap: _pickDueDate,
+                          ),
+                        ),
                       ),
-                      title: Text(
-                        DateFormatter.shortDateWithTime(_selectedDueDate),
-                        style: AppTextStyles.bodyMedium,
+                      const SizedBox(width: AppSpacing.xs),
+                      Expanded(
+                        child: Card(
+                          child: ListTile(
+                            dense: true,
+                            leading: const Icon(
+                              Icons.access_time_rounded,
+                              size: 20,
+                              color: AppColors.primaryNavy,
+                            ),
+                            title: const Text(
+                              'Jam',
+                              style: AppTextStyles.bodySmall,
+                            ),
+                            subtitle: Text(
+                              DateFormatter.timeOnly(_selectedDueDate),
+                              style: AppTextStyles.labelMedium,
+                            ),
+                            onTap: _pickDueTime,
+                          ),
+                        ),
                       ),
-                      subtitle: const Text(
-                        'Ketuk untuk mengubah tanggal tenggat',
-                        style: AppTextStyles.bodySmall,
-                      ),
-                      trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: _pickDueDate,
-                    ),
+                    ],
                   ),
                   const SizedBox(height: AppSpacing.md),
 
@@ -279,7 +385,7 @@ class _TaskFormViewState extends State<TaskFormView> {
                   const SizedBox(height: AppSpacing.md),
 
                   const Text(
-                    'Catatan (Opsional)',
+                    'Catatan / Instruksi (Opsional)',
                     style: AppTextStyles.labelLarge,
                   ),
                   const SizedBox(height: AppSpacing.xs),
@@ -287,13 +393,13 @@ class _TaskFormViewState extends State<TaskFormView> {
                     controller: _notesController,
                     maxLines: 3,
                     decoration: const InputDecoration(
-                      hintText: 'Tambahkan instruksi pengumpulan atau poin penting...',
+                      hintText: 'Tambahkan instruksi pengumpulan, format berkas, atau poin penting...',
                     ),
                   ),
                   const SizedBox(height: AppSpacing.lg),
 
                   FilledButton(
-                    onPressed: _submit,
+                    onPressed: _courses.isEmpty ? null : _submit,
                     child: Text(
                       widget.isEditMode ? 'Simpan Perubahan' : 'Simpan Tugas',
                     ),

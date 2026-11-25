@@ -178,4 +178,27 @@ void main() {
     expect(find.text(activeCourse.name), findsOneWidget);
     expect(find.text('Komponen Penilaian'), findsOneWidget);
   });
+
+  testWidgets('Rute sekunder Kalender Akademik dapat dibuka', (
+    tester,
+  ) async {
+    await pumpAppAtMobileViewport(tester, initialLocation: '/kalender');
+    expect(find.text('Kalender Akademik'), findsOneWidget);
+    expect(find.text('Hari Ini'), findsOneWidget);
+  });
+
+  testWidgets('Rute sekunder Detail Tugas dapat dibuka', (
+    tester,
+  ) async {
+    final allTasks = taskRepo.getAllAssignments();
+    expect(allTasks.isNotEmpty, isTrue);
+    final firstTask = allTasks.first;
+
+    await pumpAppAtMobileViewport(
+      tester,
+      initialLocation: '/tugas/${firstTask.id}',
+    );
+    expect(find.text('Detail Tugas'), findsOneWidget);
+    expect(find.text(firstTask.title), findsOneWidget);
+  });
 }

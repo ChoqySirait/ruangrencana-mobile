@@ -82,4 +82,30 @@ abstract final class DateFormatter {
     }
     return '${diff.inDays} hari lagi';
   }
+
+  /// Format waktu saja: "14:30"
+  static String timeOnly(DateTime date) {
+    final local = date.toLocal();
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  /// Format tanggal lengkap: "Senin, 18 Nov 2026"
+  static String fullDate(DateTime date) {
+    final local = date.toLocal();
+    final dayName = fullDayName(local.weekday);
+    final month = _shortMonths[(local.month - 1).clamp(0, 11)];
+    return '$dayName, ${local.day} $month ${local.year}';
+  }
+
+  /// Format tanggal lengkap dengan waktu: "Senin, 18 Nov 2026, 23:59"
+  static String fullDateWithTime(DateTime date) {
+    final local = date.toLocal();
+    final dayName = fullDayName(local.weekday);
+    final month = _shortMonths[(local.month - 1).clamp(0, 11)];
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '$dayName, ${local.day} $month ${local.year}, $hour:$minute';
+  }
 }

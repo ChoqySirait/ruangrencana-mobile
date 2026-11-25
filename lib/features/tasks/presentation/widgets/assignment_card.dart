@@ -80,7 +80,9 @@ class AssignmentCard extends StatelessWidget {
                     ),
                     const SizedBox(height: AppSpacing.xxs),
                     Text(
-                      item.courseName,
+                      item.courseCode.isNotEmpty
+                          ? '${item.courseCode} — ${item.courseName}'
+                          : item.courseName,
                       style: AppTextStyles.bodySmall,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
