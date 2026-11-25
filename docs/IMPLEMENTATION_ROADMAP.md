@@ -46,27 +46,30 @@ Peta jalan ini membagi pengembangan **RuangRencana** menjadi tahapan terukur aga
 
 ---
 
-## Tahap 2 — Manajemen Tugas Lengkap & Sinkronisasi Beranda
+## Tahap 2 — Manajemen Semester, Mata Kuliah, Jadwal & Komponen Penilaian (Selesai)
 
-**Tujuan**: Menyempurnakan pengelolaan tugas dan indikator prioritas.
+**Tujuan**: Mengimplementasikan manajemen siklus perkuliahan aktif, penjadwalan mingguan, dan pencatatan komponen penilaian berbasis SQLite.
 
-- Persistensi CRUD Tugas (tambah, ubah, hapus, tandai selesai, pencarian, dan penyortiran berdasarkan tenggat/prioritas).
-- Pengelolaan filter cerdas dan pengelompokan tugas per mata kuliah.
-- Validasi formulir tanggal & jam tenggat yang lebih lengkap.
-
----
-
-## Tahap 3 — Konfigurasi Komponen Penilaian & Skala Nilai Kampus
-
-**Tujuan**: Mengimplementasikan secara penuh seluruh aturan bisnis pada [docs/ACADEMIC_CALCULATION_RULES.md](ACADEMIC_CALCULATION_RULES.md).
-
-- Editor komponen penilaian per mata kuliah (tambah/ubah/hapus komponen, bobot persen, status wajib, input skor, validasi total bobot = 100%).
-- Editor skala konversi nilai kampus (tambah/ubah/hapus rentang skor, huruf, bobot mutu, serta validasi anti-overlap).
-- Kebijakan eksplisit penanganan mata kuliah mengulang (*retake*) untuk perhitungan IPK.
+- [x] Manajemen Semester: Tambah, ubah, aktifkan/nonaktifkan semester dengan validasi tanggal dan proteksi nomor semester unik.
+- [x] Manajemen Mata Kuliah: CRUD mata kuliah dengan atribut kode, nama, SKS, dosen, ruang, warna identitas, dan status aktif.
+- [x] Penjadwalan Perkuliahan: Manajemen sesi perkuliahan mingguan (hari, jam mulai, jam selesai) dengan deteksi bentrok jadwal.
+- [x] Komponen Penilaian Fleksibel: Manajemen komponen evaluasi per mata kuliah (bobot persen, status wajib, dan input skor 0.0 - 100.0 dengan penolakan silent clamping).
 
 ---
 
-## Tahap 4 — Simulasi Nilai Lanjutan & Pengingat Lokal
+## Tahap 3 — Konfigurasi Skala Nilai Kampus, Performa Akademik & Simulator IPK (Selesai)
+
+**Tujuan**: Mengimplementasikan kustomisasi skala penilaian perguruan tinggi, ringkasan capaian akademik dinamis, dan simulator target IPK/IPS terisolasi.
+
+- [x] Manajemen Skala Nilai Kampus: CRUD skala penilaian dengan preset standar (Standar 4.0 A-E, Skala Plus/Minus A-E, dan Skala Angka Ketat).
+- [x] Validasi Skala Presisi: Validasi anti-overlap, deteksi celah cakupan nilai (0.0 - 100.0), proteksi skala default (`CANNOT_DELETE_DEFAULT`), dan proteksi skala yang sedang digunakan semester (`SCALE_IN_USE`).
+- [x] Performa Akademik Relasional: Kalkulasi dinamis IPS Resmi (hanya mata kuliah berstatus final 100% bobot), IPS Sementara, IPK Kumulatif multi-semester, SKS Lulus efektif (pengecualian nilai E/0.00), dan total SKS Terdaftar.
+- [x] Riwayat Semester Terekspansi: Kartu riwayat semester dengan daftar rincian mata kuliah, huruf mutu, nilai akhir, dan SKS yang dapat diciutkan/dibuka (*collapsible*).
+- [x] Simulator Target IPK/IPS: Fitur target solver dinamis untuk merekomendasikan nilai yang harus dicapai, kalkulasi selisih delta, preset cepat, dan jaminan isolasi penuh dari database SQLite.
+
+---
+
+## Tahap 4 — Manajemen Tugas Lengkap, Pengingat Lokal & Sinkronisasi Beranda
 
 **Tujuan**: Memperkaya perencanaan target akademik dan pengingat tepat waktu.
 
